@@ -1,0 +1,26 @@
+node_modules/
+.env
+.env.local
+.DS_Store
+*.log
+logs/
+npm-debug.log*
+yarn-error.log*
+
+# Certificates and generated keys
+certs/*.pem
+certs/*.crt
+certs/*.key
+
+# Windows service artifacts (not committed)
+daemon/
+
+# Editor/IDE
+.vscode/
+.idea/
+
+# Coverage/Temp
+coverage/
+tmp/
+dist/
+build/

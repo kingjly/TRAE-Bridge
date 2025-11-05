@@ -1,0 +1,19 @@
+{
+  "mappings": [
+    {
+      "id": "OpenAI-gemma3:4b",
+      "model": "gemma3:4b",
+      "options": {}
+    },
+    {
+      "id": "OpenAI-qwen3-coder:30b",
+      "model": "qwen3-coder:30b",
+      "options": {}
+    },
+    {
+      "id": "OpenAI-qwen3-vl:30b",
+      "model": "qwen3-vl:30b",
+      "options": {}
+    }
+  ]
+}

@@ -1,0 +1,576 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>TRAE Ollama Bridge</title>
+  <link rel="icon" type="image/png" href="Traellama.png" />
+  <style>
+    :root {
+      --bg: #0b0d0c;
+      --panel: #121614;
+      --panel-2: #0e120f;
+      --text: #d9e6de;
+      --muted: #9fb5aa;
+      --green: #21e389;
+      --green-2: #18c978;
+      --red: #ff5e72;
+      --border: #1b211e;
+    }
+    * { box-sizing: border-box; }
+    html, body { height:100%; }
+    body {
+      margin:0; background:var(--bg); color:var(--text);
+      font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Microsoft Yahei", sans-serif;
+    }
+    a { color: var(--green); text-decoration: none; }
+    .container { max-width: 1040px; margin: 0 auto; padding: 24px; }
+    .header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 18px; }
+    .brand { display:flex; align-items:center; gap:14px; }
+    .logo {
+      width:40px; height:40px; border-radius:8px; border:1px solid var(--border);
+      object-fit: contain; display:block; background:none;
+    }
+    .title { font-weight:700; letter-spacing:0.3px; }
+    .subtitle { color:var(--muted); font-size:12px; }
+    .grid { display:grid; grid-template-columns: 1fr 1fr; gap:16px; }
+    .col { display:flex; flex-direction:column; gap:16px; }
+    .card { background: var(--panel); border:1px solid var(--border); border-radius:12px; padding:16px; }
+    .card h3 { margin:0 0 8px 0; font-size:16px; }
+    .card p { margin:4px 0 10px 0; color:var(--muted); }
+    .row { display:flex; gap:10px; flex-wrap:wrap; }
+    .btn {
+      background: var(--green); color:#072;
+      border:none; border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer;
+    }
+    .btn:hover { background: var(--green-2); }
+    .btn.secondary { background: #1b231f; color: var(--text); border:1px solid var(--border); }
+    .btn.secondary:hover { border-color:#2a332e; }
+    .input, .select, .textarea {
+      width:100%; background: var(--panel-2); color: var(--text);
+      border:1px solid var(--border); border-radius:10px;
+      padding:10px 12px;
+    }
+    .textarea { min-height: 120px; resize: vertical; }
+    .list { display:flex; flex-direction:column; gap:8px; }
+    .item { display:flex; align-items:center; justify-content:space-between; background:var(--panel-2); border:1px solid var(--border); border-radius:10px; padding:10px 12px; }
+    .item .meta { display:flex; align-items:center; gap:10px; }
+    .tag { font-size:12px; padding:2px 6px; border-radius:6px; background:#0c1411; color:var(--muted); border:1px solid var(--border); }
+    .copy { background:#182520; color:var(--green); border:1px solid #1f3028; border-radius:8px; padding:6px 10px; cursor:pointer; }
+    .copy:hover { border-color:#274236; }
+    .log { background: #0a100e; border:1px dashed #233027; padding:10px; border-radius:8px; height:120px; overflow:auto; white-space:pre-wrap; }
+    .toast { position:fixed; left:50%; bottom:22px; transform:translateX(-50%); background:#0f1512; color:var(--text); border:1px solid var(--border); padding:10px 14px; border-radius:10px; display:none; }
+    .split { display:grid; grid-template-columns: 1fr 1fr; gap:12px; }
+    /* Chat */
+    .chat { display:flex; flex-direction:column; gap:8px; height:380px; overflow:auto; background:var(--panel-2); border:1px solid var(--border); border-radius:10px; padding:10px; }
+    .bubble { max-width:80%; padding:10px 12px; border-radius:12px; }
+    .bubble.user { background:#13231c; border:1px solid #21382d; align-self:flex-end; }
+    .bubble.assistant { background:#0f1714; border:1px solid #1b2b23; align-self:flex-start; }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="header">
+      <div class="brand">
+        <img src="Traellama.png" alt="TRAE Logo" class="logo" />
+        <div>
+          <div class="title">TRAE Ollama Bridge</div>
+          <div class="subtitle" data-i18n="subtitle">将本地Ollama包装成OpenAI格式的API,绕过TRAE等IDE的固定模型限制</div>
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn secondary" id="toggleLang" data-i18n="toggle_lang">English</button>
+        <button class="btn secondary" id="checkStatus" data-i18n="status_btn">系统状态</button>
+      </div>
+    </div>
+
+    <div class="grid">
+      <div class="col">
+        <div class="card">
+          <h3 data-i18n="elevator_title">特权桥接服务</h3>
+          <p data-i18n="elevator_desc">自动执行可信 CA 安装、hosts(v4/v6) 配置，以及 443→本地端口转发（内置转发器优先，portproxy 备用）。安装的后台助手将把服务文件写入系统 ProgramData 目录，不污染项目文件夹。</p>
+          <div class="row">
+            <button class="btn" id="installElevator" data-i18n="install_service">注册并启动服务</button>
+            <button class="btn secondary" id="uninstallElevator" data-i18n="uninstall_service">卸载服务</button>
+            <button class="btn" id="oneClickZero" data-i18n="apply_policy">应用拦截策略</button>
+            <button class="btn secondary" id="revokeZero" data-i18n="revoke_policy">撤销拦截策略</button>
+          </div>
+          <div id="elevatorLog" class="log" style="margin-top:10px"></div>
+        </div>
+
+        <div class="card">
+          <h3 data-i18n="models_title">Ollama 模型列表</h3>
+          <p data-i18n="models_desc">扫描本地 Ollama 模型；点击右侧按钮复制本地模型名称。</p>
+          <div id="modelsList" class="list"></div>
+          <div class="row" style="margin-top:10px">
+            <button class="btn secondary" id="refreshModels" data-i18n="refresh_models">刷新列表</button>
+          </div>
+        </div>
+
+        <div class="card">
+          <h3 data-i18n="mappings_title">模型映射</h3>
+          <p data-i18n="mappings_desc">将本地 Ollama模型ID 映射到 OpenAI模型形式ID。</p>
+          <div class="row" style="justify-content:flex-end; margin-bottom:8px; gap:8px">
+            <button class="btn secondary" id="refreshMappings" data-i18n="refresh_mappings">刷新列表</button>
+            <button class="btn" id="addMappingRow" data-i18n="add_mapping">＋ 新增映射</button>
+          </div>
+          <div class="table" id="mappingsTable">
+            <div class="thead" style="display:grid; grid-template-columns: 2fr 2fr auto; gap:0; padding:8px 12px; background:#0c1411; border:1px solid var(--border); border-bottom:none; border-radius:10px 10px 0 0;">
+              <div data-i18n="map_id">映射 ID</div>
+              <div data-i18n="local_model">本地模型名称</div>
+              <div style="text-align:right" data-i18n="actions">操作</div>
+            </div>
+            <div class="tbody" id="mappingsBody" style="border:1px solid var(--border); border-top:none; border-radius:0 0 10px 10px"></div>
+          </div>
+        </div>
+      </div>
+
+      <div class="col">
+        <div class="card">
+          <h3 data-i18n="chat_title">聊天测试</h3>
+          <p data-i18n="chat_desc">选择映射的 OpenAI模型ID 进行 OpenAI 兼容的聊天测试。</p>
+          <div class="split">
+            <div>
+              <label data-i18n="chat_model_label">映射 ID / 模型</label>
+              <select class="select" id="chatModel"></select>
+            </div>
+            <div>
+              <label data-i18n="chat_stream_label">是否流式</label>
+              <select class="select" id="chatStream">
+                <option value="true">流式</option>
+                <option value="false">非流式</option>
+              </select>
+            </div>
+          </div>
+          <div id="chatView" class="chat" style="margin-top:10px"></div>
+          <textarea id="chatInput" class="textarea" placeholder="输入你的问题..." style="margin-top:10px"></textarea>
+          <div class="row" style="margin-top:10px">
+            <button class="btn" id="sendChat" data-i18n="send">发送</button>
+            <button class="btn secondary" id="clearChat" data-i18n="clear">清空</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <div id="toast" class="toast"></div>
+  </div>
+
+  <script>
+    // i18n
+    let currentLang = localStorage.getItem('lang') || 'zh';
+    const I18N = {
+      zh: {
+        subtitle: '将本地Ollama包装成OpenAI格式的API,绕过TRAE等IDE的固定模型限制',
+        toggle_lang: 'English',
+        status_btn: '系统状态',
+        elevator_title: '特权桥接服务',
+        elevator_desc: '自动执行可信 CA 安装、hosts(v4/v6) 配置，以及 443→本地端口转发（内置转发器优先，portproxy 备用）。安装的后台助手将把服务文件写入系统 ProgramData 目录，不污染项目文件夹。',
+        install_service: '注册并启动服务',
+        uninstall_service: '卸载服务',
+        apply_policy: '应用拦截策略',
+        revoke_policy: '撤销拦截策略',
+        models_title: 'Ollama 模型列表',
+        models_desc: '扫描本地 Ollama 模型；点击右侧按钮复制本地模型名称。',
+        refresh_models: '刷新列表',
+        mappings_title: '模型映射',
+        mappings_desc: '将本地 Ollama模型ID 映射到 OpenAI模型形式ID。',
+        refresh_mappings: '刷新列表',
+        add_mapping: '＋ 新增映射',
+        map_id: '映射 ID',
+        local_model: '本地模型名称',
+        actions: '操作',
+        chat_title: '聊天测试',
+        chat_desc: '选择映射的 OpenAI模型ID 进行 OpenAI 兼容的聊天测试。',
+        chat_model_label: '映射 ID / 模型',
+        chat_stream_label: '是否流式',
+        stream_true: '流式',
+        stream_false: '非流式',
+        send: '发送',
+        clear: '清空',
+        chat_input_placeholder: '输入你的问题...',
+        copied: '已复制：',
+        copy_failed: '复制失败',
+        copy: '复制',
+        load_models_failed: '加载模型失败',
+        load_mappings_failed: '加载映射失败',
+        save: '保存',
+        delete: '删除',
+        fill_mapping: '请填写映射 ID 与模型',
+        mapping_saved: '映射已保存',
+        save_failed: '保存失败',
+        fill_delete: '请先填写或选择要删除的映射 ID',
+        mapping_deleted: '映射已删除',
+        delete_failed: '删除失败',
+        example_map_id: '如：OpenAI-gemma3:4b',
+        example_model_name: '如：gemma3:4b',
+        chat_failed: '聊天失败',
+        status_failed: '状态检查失败',
+        applying_policy: '应用策略：可信 CA 安装、hosts(v4/v6) 配置、443→本地端口转发（转发器优先）...',
+        installing_elevator: '正在注册并启动特权桥接服务（一次 UAC）...',
+        running_status: '运行状态：',
+        revoke_start: '撤销策略：停止 443 转发 / 端口代理，并清理 hosts 条目...',
+        revoke_failed: '撤销失败：',
+        revoke_done: '撤销完成',
+        https_label: 'HTTPS',
+        hosts_label: 'hosts',
+        enabled: '已启用',
+        disabled: '未启用',
+        written: '已写入',
+        not_written: '未写入',
+        service_port_label: '服务端口: ',
+        exec_error: '执行异常：'
+      },
+      en: {
+        subtitle: 'Wrap local Ollama as OpenAI-compatible API and bypass fixed model restrictions in IDEs.',
+        toggle_lang: '中文',
+        status_btn: 'System Status',
+        elevator_title: 'Privileged Bridge Service',
+        elevator_desc: 'Install trusted CA, configure hosts (v4/v6), and set up 443→local port forwarding (forwarder first, portproxy fallback). Files are stored under ProgramData to keep the project folder clean.',
+        install_service: 'Install & Start Service',
+        uninstall_service: 'Uninstall Service',
+        apply_policy: 'Apply Intercept Policy',
+        revoke_policy: 'Revoke Policy',
+        models_title: 'Ollama Models',
+        models_desc: 'Scan local Ollama models; use the button to copy model names.',
+        refresh_models: 'Refresh',
+        mappings_title: 'Model Mappings',
+        mappings_desc: 'Map local Ollama model IDs to OpenAI-style IDs.',
+        refresh_mappings: 'Refresh',
+        add_mapping: '+ Add Mapping',
+        map_id: 'Mapping ID',
+        local_model: 'Local Model Name',
+        actions: 'Actions',
+        chat_title: 'Chat Test',
+        chat_desc: 'Select an OpenAI-style mapping ID to run OpenAI-compatible chat.',
+        chat_model_label: 'Mapping ID / Model',
+        chat_stream_label: 'Streaming',
+        stream_true: 'Streaming',
+        stream_false: 'Non-streaming',
+        send: 'Send',
+        clear: 'Clear',
+        chat_input_placeholder: 'Type your question...',
+        copied: 'Copied: ',
+        copy_failed: 'Copy failed',
+        copy: 'Copy',
+        load_models_failed: 'Failed to load models',
+        load_mappings_failed: 'Failed to load mappings',
+        save: 'Save',
+        delete: 'Delete',
+        fill_mapping: 'Please fill mapping ID and model',
+        mapping_saved: 'Mapping saved',
+        save_failed: 'Save failed',
+        fill_delete: 'Please specify an ID to delete',
+        mapping_deleted: 'Mapping deleted',
+        delete_failed: 'Delete failed',
+        example_map_id: 'e.g., OpenAI-gemma3:4b',
+        example_model_name: 'e.g., gemma3:4b',
+        chat_failed: 'Chat failed',
+        status_failed: 'Status check failed',
+        applying_policy: 'Applying policy: install trusted CA, configure hosts (v4/v6), and 443→local port forwarding (forwarder first)...',
+        installing_elevator: 'Installing and starting privileged bridge service (one UAC)...',
+        running_status: 'Runtime: ',
+        revoke_start: 'Revoking policy: stop 443 forwarding/portproxy and clean hosts...',
+        revoke_failed: 'Revoke failed: ',
+        revoke_done: 'Revoke done',
+        https_label: 'HTTPS',
+        hosts_label: 'hosts',
+        enabled: 'enabled',
+        disabled: 'disabled',
+        written: 'written',
+        not_written: 'not written',
+        service_port_label: 'Service port: ',
+        exec_error: 'Execution error: '
+      }
+    };
+    function t(k){ return (I18N[currentLang] && I18N[currentLang][k]) || k; }
+    function applyI18N(){
+      document.documentElement.lang = currentLang === 'zh' ? 'zh-CN' : 'en';
+      document.querySelectorAll('[data-i18n]').forEach(el => {
+        const key = el.getAttribute('data-i18n');
+        const val = t(key);
+        if (el.tagName === 'INPUT' || el.tagName === 'TEXTAREA') el.placeholder = val; else el.textContent = val;
+      });
+      const s = document.getElementById('chatStream');
+      if (s && s.options.length >= 2) { s.options[0].text = t('stream_true'); s.options[1].text = t('stream_false'); }
+      const input = document.getElementById('chatInput'); if (input) input.placeholder = t('chat_input_placeholder');
+    }
+    function toggleLang(){ currentLang = currentLang === 'zh' ? 'en' : 'zh'; localStorage.setItem('lang', currentLang); applyI18N(); }
+
+    // Utilities
+    function showToast(msg) {
+      const t = document.getElementById('toast');
+      t.textContent = msg;
+      t.style.display = 'block';
+      setTimeout(() => t.style.display = 'none', 1400);
+    }
+    async function fetchJSON(url, opts={}) {
+      const r = await fetch(url, opts);
+      const j = await r.json();
+      if (!r.ok) throw new Error(j.error || r.statusText);
+      return j;
+    }
+    async function copyText(text) {
+      try { await navigator.clipboard.writeText(text); showToast(t('copied') + text); }
+      catch { showToast(t('copy_failed')); }
+    }
+
+    // Zero-interaction service
+    async function installElevator() {
+      const log = document.getElementById('elevatorLog');
+      log.textContent = t('installing_elevator') + '\n';
+      try {
+        const r = await fetch('/bridge/setup/install-elevated-service', { method: 'POST' });
+        const j = await r.json();
+        log.textContent += `${j.ok ? '✅' : '❌'} ${j.detail || ''}\n`;
+        // 合并运行状态输出
+        try {
+          const st = await fetchJSON('/bridge/setup/elevated-service-status');
+          log.textContent += `${t('running_status')}${st.ok} ${t('service_port_label')}${st.port}\n`;
+        } catch (e) {
+          log.textContent += '查看状态失败：' + e + '\n';
+        }
+      } catch (e) {
+        log.textContent += t('exec_error') + e + '\n';
+    }
+    }
+    async function uninstallElevator() {
+      const log = document.getElementById('elevatorLog');
+      log.textContent = '正在卸载特权桥接服务...\n';
+      try {
+        const r = await fetch('/bridge/setup/uninstall-elevated-service', { method: 'POST' });
+        const j = await r.json();
+        log.textContent += `${j.ok ? '✅' : '❌'} ${j.detail || ''}\n`;
+      } catch (e) {
+        log.textContent += '执行异常：' + e + '\n';
+      }
+    }
+    async function oneClickZero() {
+      const log = document.getElementById('elevatorLog');
+      log.textContent = t('applying_policy') + '\n';
+      try {
+        const r = await fetch('/bridge/setup/https-hosts', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domain: 'api.openai.com' })
+        });
+        const j = await r.json();
+        (j.steps || []).forEach(s => {
+          log.textContent += `${s.ok ? '✅' : '❌'} ${s.name}: ${s.detail || ''}\n`;
+          if (s.error) log.textContent += `   ↳ 错误: ${s.error}\n`;
+        });
+        if (j.port) log.textContent += `${t('service_port_label')}${j.port}\n`;
+      } catch (e) {
+        log.textContent += t('exec_error') + e + '\n';
+      }
+    }
+
+    async function revokeZero() {
+      const log = document.getElementById('elevatorLog');
+      log.textContent = t('revoke_start') + '\n';
+      try {
+        const r = await fetch('/bridge/setup/revoke', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domain: 'api.openai.com' })
+        });
+        const j = await r.json();
+        (j.steps || []).forEach(s => {
+          log.textContent += `${s.ok ? '✅' : '❌'} ${s.name}: ${s.detail || ''}\n`;
+          if (s.error) log.textContent += `   ↳ 错误: ${s.error}\n`;
+        });
+        if (j.ok) log.textContent += t('revoke_done') + '\n';
+      } catch (e) {
+        log.textContent += t('revoke_failed') + e + '\n';
+      }
+    }
+
+    // Models
+    async function loadModels() {
+      try {
+        const j = await fetchJSON('/bridge/ollama/models');
+        const list = document.getElementById('modelsList');
+        list.innerHTML = '';
+        j.models.forEach(m => {
+          const div = document.createElement('div'); div.className = 'item';
+          div.innerHTML = `<div class="meta"><strong>${m.name}</strong><span class="tag">${(m.size/1024/1024).toFixed(1)} MB</span></div>`;
+          const btn = document.createElement('button'); btn.className = 'copy'; btn.setAttribute('data-i18n','copy'); btn.textContent = t('copy');
+          btn.onclick = () => copyText(m.name);
+          div.appendChild(btn);
+          list.appendChild(div);
+        });
+        applyI18N();
+      } catch (e) {
+        showToast(t('load_models_failed'));
+      }
+    }
+
+    // Mappings: table-based editable rows
+    function createMappingRow(m={ id:'', model:'' }) {
+      const row = document.createElement('div');
+      row.className = 'tr';
+      row.style.display = 'grid';
+      row.style.gridTemplateColumns = '2fr 2fr auto';
+      row.style.gap = '0';
+      row.style.padding = '8px 12px';
+      row.style.borderTop = '1px solid var(--border)';
+      row.dataset.originalId = m.id || '';
+
+      const tdId = document.createElement('div');
+      const inputId = document.createElement('input');
+      inputId.className = 'input';
+      inputId.setAttribute('data-i18n','example_map_id');
+      inputId.placeholder = t('example_map_id');
+      inputId.value = m.id || '';
+      tdId.appendChild(inputId);
+
+      const tdModel = document.createElement('div');
+      const inputModel = document.createElement('input');
+      inputModel.className = 'input';
+      inputModel.setAttribute('data-i18n','example_model_name');
+      inputModel.placeholder = t('example_model_name');
+      inputModel.value = m.model || '';
+      tdModel.appendChild(inputModel);
+
+      const tdActions = document.createElement('div');
+      tdActions.style.display = 'flex';
+      tdActions.style.justifyContent = 'flex-end';
+      tdActions.style.gap = '8px';
+      const saveBtn = document.createElement('button'); saveBtn.className = 'btn'; saveBtn.setAttribute('data-i18n','save'); saveBtn.textContent = t('save');
+      const delBtn = document.createElement('button'); delBtn.className = 'btn secondary'; delBtn.setAttribute('data-i18n','delete'); delBtn.textContent = t('delete');
+
+      saveBtn.onclick = async () => {
+        const id = inputId.value.trim();
+        const model = inputModel.value.trim();
+        if (!id || !model) { showToast(t('fill_mapping')); return; }
+        try {
+          await fetchJSON('/bridge/models', {
+            method: 'POST', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ id, model })
+          });
+          row.dataset.originalId = id;
+          showToast(t('mapping_saved'));
+          await loadMappings();
+        } catch (e) { showToast(t('save_failed')); }
+      };
+
+      delBtn.onclick = async () => {
+        const id = (inputId.value.trim() || row.dataset.originalId);
+        if (!id) { showToast(t('fill_delete')); return; }
+        try {
+          const r = await fetch(`/bridge/models/${encodeURIComponent(id)}`, { method: 'DELETE' });
+          if (!r.ok) throw new Error('删除失败');
+          showToast(t('mapping_deleted'));
+          await loadMappings();
+        } catch (e) { showToast(t('delete_failed')); }
+      };
+
+      tdActions.appendChild(saveBtn);
+      tdActions.appendChild(delBtn);
+
+      row.appendChild(tdId);
+      row.appendChild(tdModel);
+      row.appendChild(tdActions);
+      return row;
+    }
+
+    async function loadMappings() {
+      try {
+        const j = await fetchJSON('/bridge/models');
+        const body = document.getElementById('mappingsBody'); body.innerHTML = '';
+        const select = document.getElementById('chatModel'); select.innerHTML = '';
+        (j.mappings || []).forEach(m => {
+          body.appendChild(createMappingRow(m));
+          const opt = document.createElement('option'); opt.value = m.id; opt.textContent = m.id;
+          select.appendChild(opt);
+        });
+        applyI18N();
+      } catch (e) { showToast(t('load_mappings_failed')); }
+    }
+
+    document.getElementById('addMappingRow').onclick = () => {
+      const body = document.getElementById('mappingsBody');
+      body.appendChild(createMappingRow());
+    };
+
+    // Chat
+    const chatMsgs = [];
+    function renderChat() {
+      const view = document.getElementById('chatView');
+      view.innerHTML = '';
+      chatMsgs.forEach(m => {
+        const div = document.createElement('div');
+        div.className = 'bubble ' + (m.role === 'user' ? 'user' : 'assistant');
+        div.textContent = m.content;
+        view.appendChild(div);
+      });
+      view.scrollTop = view.scrollHeight;
+    }
+    async function sendChat() {
+      const model = document.getElementById('chatModel').value || document.getElementById('chatModel').textContent;
+      const stream = document.getElementById('chatStream').value === 'true';
+      const input = document.getElementById('chatInput');
+      const text = input.value.trim();
+      if (!text) return;
+      chatMsgs.push({ role: 'user', content: text });
+      renderChat(); input.value = '';
+      try {
+        const body = { model, messages: chatMsgs.slice(), stream };
+        const r = await fetch('/v1/chat/completions', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        });
+        if (stream) {
+          const reader = r.body.getReader(); let buf = '';
+          const dec = new TextDecoder();
+          const assistant = { role: 'assistant', content: '' };
+          chatMsgs.push(assistant);
+          renderChat();
+          while (true) {
+            const { value, done } = await reader.read();
+            if (done) break;
+            buf += dec.decode(value, { stream:true });
+            const parts = buf.split(/\n\n/);
+            buf = parts.pop();
+            for (const part of parts) {
+              if (!part.startsWith('data:')) continue;
+              const payload = part.substring(5).trim();
+              if (payload === '[DONE]') continue;
+              try {
+                const j = JSON.parse(payload);
+                const delta = j?.choices?.[0]?.delta?.content || '';
+                if (delta) { assistant.content += delta; renderChat(); }
+              } catch {}
+            }
+          }
+        } else {
+          const j = await r.json();
+          const cont = j?.choices?.[0]?.message?.content || '';
+          chatMsgs.push({ role:'assistant', content: cont });
+          renderChat();
+        }
+      } catch (e) { showToast(t('chat_failed')); }
+    }
+    function clearChat() { chatMsgs.length = 0; renderChat(); }
+
+    // Status
+    async function checkStatus() {
+      try {
+        const j = await fetchJSON('/bridge/setup/status?domain=api.openai.com');
+        showToast(`${t('https_label')}: ${j.https_enabled ? t('enabled') : t('disabled')} · ${t('hosts_label')}: ${j.hosts_contains ? t('written') : t('not_written')}`);
+      } catch (e) { showToast(t('status_failed')); }
+    }
+
+    // Init
+    document.getElementById('installElevator').onclick = installElevator;
+    document.getElementById('oneClickZero').onclick = oneClickZero;
+    document.getElementById('revokeZero').onclick = revokeZero;
+    document.getElementById('uninstallElevator').onclick = uninstallElevator;
+    document.getElementById('toggleLang').onclick = toggleLang;
+    document.getElementById('refreshModels').onclick = loadModels;
+    document.getElementById('refreshMappings').onclick = loadMappings;
+    document.getElementById('sendChat').onclick = sendChat;
+    document.getElementById('clearChat').onclick = clearChat;
+    document.getElementById('checkStatus').onclick = checkStatus;
+
+    applyI18N();
+    loadModels();
+    loadMappings();
+    renderChat();
+  </script>
+</body>
+</html>
