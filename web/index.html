@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>TRAE Ollama Bridge</title>
-  <link rel="icon" type="image/png" href="Traellama.png" />
+  <link rel="icon" type="image/png" href="/img/Traellama.png" />
   <style>
     :root {
       --bg: #0b0d0c;
@@ -23,8 +23,26 @@
       margin:0; background:var(--bg); color:var(--text);
       font: 14px/1.4 system-ui, -apple-system, Segoe UI, Roboto, Helvetica, Arial, "Microsoft Yahei", sans-serif;
     }
+    /* Decorative slanted background */
+    body::before {
+      content: "";
+      position: fixed;
+      left: -50%;
+      top: -50%;
+      width: 200%;
+      height: 200%;
+      background-image: url('/img/Ollama.png'), url('/img/TRAE.png');
+      background-repeat: repeat;
+      background-size: 240px auto, 240px auto;
+      background-position: 0 0, 120px 120px;
+      opacity: 0.05;
+      transform: rotate(30deg);
+      transform-origin: center;
+      pointer-events: none;
+      z-index: 0;
+    }
     a { color: var(--green); text-decoration: none; }
-    .container { max-width: 1040px; margin: 0 auto; padding: 24px; }
+    .container { position: relative; z-index: 1; max-width: 1040px; margin: 0 auto; padding: 24px; }
     .header { display:flex; align-items:center; justify-content:space-between; margin-bottom: 18px; }
     .brand { display:flex; align-items:center; gap:14px; }
     .logo {
@@ -72,7 +90,7 @@
   <div class="container">
     <div class="header">
       <div class="brand">
-        <img src="Traellama.png" alt="TRAE Logo" class="logo" />
+        <img src="/img/Traellama.png" alt="TRAE-Ollama-Bridge Logo" class="logo" />
         <div>
           <div class="title">TRAE Ollama Bridge</div>
           <div class="subtitle" data-i18n="subtitle">将本地Ollama包装成OpenAI格式的API,绕过TRAE等IDE的固定模型限制</div>
@@ -131,7 +149,7 @@
           <p data-i18n="chat_desc">选择映射的 OpenAI模型ID 进行 OpenAI 兼容的聊天测试。</p>
           <div class="split">
             <div>
-              <label data-i18n="chat_model_label">映射 ID / 模型</label>
+              <label data-i18n="chat_model_label">映射 ID</label>
               <select class="select" id="chatModel"></select>
             </div>
             <div>
@@ -140,6 +158,21 @@
                 <option value="true">流式</option>
                 <option value="false">非流式</option>
               </select>
+            </div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div style="flex:1">
+              <label data-i18n="chat_mode_label">测试模式</label>
+              <select class="select" id="chatMode">
+                <option value="bridge" data-i18n="mode_bridge">显式桥接（本地 /v1）</option>
+                <option value="intercept" data-i18n="mode_intercept">透明拦截（https://api.openai.com）</option>
+              </select>
+            </div>
+          </div>
+          <div class="row" style="margin-top:8px">
+            <div style="flex:1">
+              <label data-i18n="chat_api_key_label">API Key</label>
+              <input id="chatApiKey" class="input" type="text" data-i18n="chat_api_key_placeholder" placeholder="可选：输入用于校验的密钥" />
             </div>
           </div>
           <div id="chatView" class="chat" style="margin-top:10px"></div>
@@ -181,8 +214,13 @@
         actions: '操作',
         chat_title: '聊天测试',
         chat_desc: '选择映射的 OpenAI模型ID 进行 OpenAI 兼容的聊天测试。',
-        chat_model_label: '映射 ID / 模型',
+        chat_model_label: '映射 ID',
         chat_stream_label: '是否流式',
+        chat_mode_label: '测试模式',
+        mode_bridge: '显式桥接（本地 /v1）',
+        mode_intercept: '透明拦截（https://api.openai.com）',
+        chat_api_key_label: 'API Key',
+        chat_api_key_placeholder: '可选：输入用于校验的密钥',
         stream_true: '流式',
         stream_false: '非流式',
         send: '发送',
@@ -242,8 +280,13 @@
         actions: 'Actions',
         chat_title: 'Chat Test',
         chat_desc: 'Select an OpenAI-style mapping ID to run OpenAI-compatible chat.',
-        chat_model_label: 'Mapping ID / Model',
+        chat_model_label: 'Mapping ID',
         chat_stream_label: 'Streaming',
+        chat_mode_label: 'Test Mode',
+        mode_bridge: 'Explicit Bridge (/v1, local)',
+        mode_intercept: 'Transparent Interception (https://api.openai.com)',
+        chat_api_key_label: 'API Key',
+        chat_api_key_placeholder: 'Optional: enter API key',
         stream_true: 'Streaming',
         stream_false: 'Non-streaming',
         send: 'Send',
@@ -292,6 +335,8 @@
       });
       const s = document.getElementById('chatStream');
       if (s && s.options.length >= 2) { s.options[0].text = t('stream_true'); s.options[1].text = t('stream_false'); }
+      const m = document.getElementById('chatMode');
+      if (m && m.options.length >= 2) { m.options[0].text = t('mode_bridge'); m.options[1].text = t('mode_intercept'); }
       const input = document.getElementById('chatInput'); if (input) input.placeholder = t('chat_input_placeholder');
     }
     function toggleLang(){ currentLang = currentLang === 'zh' ? 'en' : 'zh'; localStorage.setItem('lang', currentLang); applyI18N(); }
@@ -504,6 +549,8 @@
     async function sendChat() {
       const model = document.getElementById('chatModel').value || document.getElementById('chatModel').textContent;
       const stream = document.getElementById('chatStream').value === 'true';
+      const mode = (document.getElementById('chatMode')?.value) || 'bridge';
+      const apiKey = (document.getElementById('chatApiKey')?.value || '').trim();
       const input = document.getElementById('chatInput');
       const text = input.value.trim();
       if (!text) return;
@@ -511,8 +558,11 @@
       renderChat(); input.value = '';
       try {
         const body = { model, messages: chatMsgs.slice(), stream };
-        const r = await fetch('/v1/chat/completions', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body)
+        const endpoint = mode === 'intercept' ? 'https://api.openai.com/v1/chat/completions' : '/v1/chat/completions';
+        const headers = { 'Content-Type': 'application/json' };
+        if (apiKey) headers['Authorization'] = 'Bearer ' + apiKey;
+        const r = await fetch(endpoint, {
+          method: 'POST', headers, body: JSON.stringify(body)
         });
         if (stream) {
           const reader = r.body.getReader(); let buf = '';

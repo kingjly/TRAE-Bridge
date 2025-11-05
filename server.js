@@ -73,6 +73,8 @@ function authMiddleware(req, res, next) {
 
 // Static Web UI
 app.use('/assets', express.static(path.join(__dirname, 'scripts')));
+// Serve brand and background images
+app.use('/img', express.static(path.join(__dirname, 'img')));
 app.use('/', express.static(path.join(__dirname, 'web')));
 
 // Health
