@@ -5,13 +5,14 @@
 
 Updated: 2025-11-05 • Version: latest
 
-> Use local Ollama models in IDEs that hard-code OpenAI endpoints. This bridge wraps Ollama with an OpenAI-compatible API and offers a Web UI to manage model mappings, test chats, and optionally intercept `https://api.openai.com` transparently.
+> Use local Ollama models or any third-party OpenAI-compatible API in IDEs that hard-code OpenAI endpoints. This bridge provides a unified OpenAI-compatible layer, with Web UI controls for model mapping, upstream routing, chat testing, and optional transparent interception of `https://api.openai.com`.
 
 ## Overview
-Wrap local Ollama into an OpenAI-compatible interface to bypass fixed model/vendor and Base URL restrictions in TRAE and similar IDEs. The Web UI manages model mappings and provides a chat tester. An optional system-level interception policy can transparently take over clients that always call `https://api.openai.com`.
+Wrap local Ollama or a custom OpenAI-compatible upstream into a bridgeable interface to bypass fixed model/vendor and Base URL restrictions in TRAE and similar IDEs. The Web UI manages model mappings, upstream configuration, and chat testing. An optional system-level interception policy can transparently take over clients that always call `https://api.openai.com`.
 
 ## Highlights
 - OpenAI-compatible `/v1` endpoints: plug-and-play with TRAE and similar IDEs.
+- Upstream switching: route to local Ollama or any OpenAI-compatible third-party provider.
 - Dual-mode chat test: switch between "Explicit Bridge" and "Transparent Interception" in one click.
 - Optional API Key validation: respects `EXPECTED_API_KEY` and `ACCEPT_ANY_API_KEY` policies.
 - One-click system policy: install/reuse local CA & domain certs, write hosts, and configure 443→local port forwarding.
@@ -20,7 +21,7 @@ Wrap local Ollama into an OpenAI-compatible interface to bypass fixed model/vend
 - Local-first privacy: traffic stays on your machine.
 
 ## Notes
-1. Make sure Ollama is installed and your required models run correctly. Consider increasing the context length for your models.
+1. If you use `UPSTREAM_TYPE=ollama`, make sure Ollama is installed and your required models run correctly (consider increasing context length).
 2. Copy `.env.example` to `.env` and adjust values to your environment.
 3. Start this project before configuring the Trae IDE custom model.
 
@@ -30,6 +31,11 @@ See `.env.example`:
 - `HTTPS_ENABLED=true|false` (default `false`)
 - `SSL_CERT_FILE`, `SSL_KEY_FILE` (required when HTTPS is enabled)
 - `OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`)
+- `UPSTREAM_TYPE=ollama|openai` (default `ollama`)
+- `UPSTREAM_BASE_URL` (optional override)
+- `UPSTREAM_API_KEY` (optional upstream bearer token)
+- `UPSTREAM_CHAT_PATH`, `UPSTREAM_MODELS_PATH` (optional endpoint overrides for non-standard compatible APIs)
+- `FORWARD_CLIENT_API_KEY=true|false` (default `true`)
 - `EXPECTED_API_KEY` (optional fixed key)
 - `ACCEPT_ANY_API_KEY=true|false` (default `true`)
 - `STRIP_THINK_TAGS=true|false` (strip `<think>...</think>` blocks)
@@ -43,13 +49,13 @@ See `.env.example`:
    - Click "Install & Start Service".
    - Click "Apply Intercept Policy".
    - To undo, click "Revoke Policy" or "Uninstall Service".
-4. Web UI Ollama models list:
-   - Click "Refresh" to list local Ollama models.
+4. Web UI upstream models list:
+   - Click "Refresh" to list models from your active upstream target.
    - Click "Copy" to copy the model name.
 5. Web UI model mappings:
    - Click "Refresh" to show current mappings.
    - Click "Add Mapping" to add a new mapping row.
-     - Enter local Ollama model name in "Local Model Name" (e.g., `llama2-13b`).
+     - Enter upstream model name in "Local Model Name" (e.g., `llama2-13b` or `gpt-4o-mini`).
      - Enter a global alias in "Mapping ID" (e.g., `OpenAI-llama2-13b`) to use in IDEs like TRAE.
    - Click "Save" to persist mappings.
    - Click "Delete" to remove a mapping row.
@@ -85,6 +91,13 @@ See `.env.example`:
 - Transparent Interception: for clients that hard-code `https://api.openai.com`. A system-level 443→PORT mapping combined with local CA and domain certificate handles TLS verification to take over traffic.
 - Explicit Bridge: if the client supports a custom Base URL, use `http://localhost:PORT/v1` or, with HTTPS enabled, `https://localhost:PORT/v1`.
 
+## Use Third-Party OpenAI-Compatible APIs
+1. Open Web UI and set upstream type to `openai`.
+2. Fill upstream base URL (for example `https://your-provider.example.com`).
+3. Fill upstream API key (or leave empty and let bridge forward the API key from TRAE).
+4. If provider endpoints are non-standard, set custom chat/models paths.
+5. Save, refresh model list, and create mapping aliases for TRAE.
+
 ## FAQ
 - Chat fails in Transparent Interception mode?
   - In the Web UI, click "System Status" and confirm it shows "HTTPS: Enabled · hosts: Written".
@@ -106,7 +119,9 @@ See `.env.example`:
 
 ## Management APIs
 - `GET/POST/DELETE /bridge/models`: manage the mapping table
-- `GET /bridge/ollama/models`: list local models
+- `GET/POST /bridge/upstream`: get/update active upstream config
+- `GET /bridge/upstream/models`: list models from active upstream
+- `GET /bridge/ollama/models`: backward-compatible alias of upstream models endpoint
 - `POST /bridge/setup/https-hosts`: generate/reuse local CA and domain certs, write hosts, and configure 443→PORT
 - `POST /bridge/setup/install-elevated-service`: install/start a zero-interaction helper service
 - `POST /bridge/setup/uninstall-elevated-service`: uninstall the helper service

@@ -14,6 +14,11 @@
       "id": "OpenAI-qwen3-vl:30b",
       "model": "qwen3-vl:30b",
       "options": {}
+    },
+    {
+      "id": "gpt-5.3-codex-xhigh",
+      "model": "gpt-5.3-codex-xhigh",
+      "options": {}
     }
   ]
 }
