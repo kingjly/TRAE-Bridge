@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>TRAE Ollama Bridge</title>
+  <title>TRAE Bridge</title>
   <link rel="icon" type="image/png" href="/img/Traellama.png" />
   <style>
     :root {
@@ -57,6 +57,27 @@
     .card h3 { margin:0 0 8px 0; font-size:16px; }
     .card p { margin:4px 0 10px 0; color:var(--muted); }
     .row { display:flex; gap:10px; flex-wrap:wrap; }
+    .quick-status { margin: 0 0 10px 0; color: var(--muted); font-size: 12px; }
+    .switch-row { display:flex; align-items:center; gap:10px; }
+    .switch-label { font-size:13px; color:var(--text); }
+    .switch {
+      position: relative; display: inline-block; width: 50px; height: 28px;
+    }
+    .switch input { opacity: 0; width: 0; height: 0; }
+    .slider {
+      position: absolute; cursor: pointer; inset: 0;
+      background-color: #25302a; transition: .2s; border-radius: 999px; border:1px solid var(--border);
+    }
+    .slider:before {
+      position: absolute; content: ""; height: 20px; width: 20px; left: 3px; top: 3px;
+      background-color: #d7e4dc; transition: .2s; border-radius: 50%;
+    }
+    input:checked + .slider { background-color: #1a7f52; }
+    input:checked + .slider:before { transform: translateX(22px); }
+    input:disabled + .slider { opacity: 0.55; cursor: not-allowed; }
+    .details-wrap { margin-top: 10px; border-top: 1px solid var(--border); padding-top: 10px; }
+    .details-wrap summary { cursor: pointer; color: var(--muted); }
+    .details-wrap[open] summary { color: var(--text); }
     .btn {
       background: var(--green); color:#072;
       border:none; border-radius:10px; padding:10px 14px; font-weight:600; cursor:pointer;
@@ -90,10 +111,10 @@
   <div class="container">
     <div class="header">
       <div class="brand">
-        <img src="/img/Traellama.png" alt="TRAE-Ollama-Bridge Logo" class="logo" />
+        <img src="/img/Traellama.png" alt="TRAE Bridge Logo" class="logo" />
         <div>
-          <div class="title">TRAE Ollama Bridge</div>
-          <div class="subtitle" data-i18n="subtitle">将本地Ollama包装成OpenAI格式的API,绕过TRAE等IDE的固定模型限制</div>
+          <div class="title">TRAE Bridge</div>
+          <div class="subtitle" data-i18n="subtitle">将本地模型与 OpenAI 兼容上游统一桥接为 OpenAI 格式 API，兼容 TRAE 等 IDE 的固定服务商限制</div>
         </div>
       </div>
       <div class="row">
@@ -107,12 +128,23 @@
         <div class="card">
           <h3 data-i18n="elevator_title">特权桥接服务</h3>
           <p data-i18n="elevator_desc">自动执行可信 CA 安装、hosts(v4/v6) 配置，以及 443→本地端口转发（内置转发器优先，portproxy 备用）。安装的后台助手将把服务文件写入系统 ProgramData 目录，不污染项目文件夹。</p>
-          <div class="row">
-            <button class="btn" id="installElevator" data-i18n="install_service">注册并启动服务</button>
-            <button class="btn secondary" id="uninstallElevator" data-i18n="uninstall_service">卸载服务</button>
-            <button class="btn" id="oneClickZero" data-i18n="apply_policy">应用拦截策略</button>
-            <button class="btn secondary" id="revokeZero" data-i18n="revoke_policy">撤销拦截策略</button>
+          <div class="switch-row">
+            <label class="switch" for="quickElevatorSwitch">
+              <input type="checkbox" id="quickElevatorSwitch" />
+              <span class="slider"></span>
+            </label>
+            <span class="switch-label" data-i18n="quick_toggle_label">拦截总开关</span>
           </div>
+          <p id="quickElevatorState" class="quick-status" data-i18n="quick_status_checking">状态检测中...</p>
+          <details class="details-wrap">
+            <summary data-i18n="advanced_actions">高级操作</summary>
+            <div class="row" style="margin-top:10px">
+              <button class="btn" id="installElevator" data-i18n="install_service">注册并启动服务</button>
+              <button class="btn" id="oneClickZero" data-i18n="apply_policy">应用拦截策略</button>
+              <button class="btn secondary" id="revokeZero" data-i18n="revoke_policy">撤销拦截策略</button>
+              <button class="btn secondary" id="uninstallElevator" data-i18n="uninstall_service">卸载服务</button>
+            </div>
+          </details>
           <div id="elevatorLog" class="log" style="margin-top:10px"></div>
         </div>
 
@@ -254,7 +286,7 @@
     let currentLang = localStorage.getItem('lang') || 'zh';
     const I18N = {
       zh: {
-        subtitle: '将本地Ollama包装成OpenAI格式的API,绕过TRAE等IDE的固定模型限制',
+        subtitle: '将本地模型与 OpenAI 兼容上游统一桥接为 OpenAI 格式 API，兼容 TRAE 等 IDE 的固定服务商限制',
         toggle_lang: 'English',
         status_btn: '系统状态',
         elevator_title: '特权桥接服务',
@@ -324,6 +356,13 @@
         revoke_start: '撤销策略：停止 443 转发 / 端口代理，并清理 hosts 条目...',
         revoke_failed: '撤销失败：',
         revoke_done: '撤销完成',
+        quick_toggle_label: '拦截总开关',
+        quick_status_checking: '状态检测中...',
+        quick_state_inactive: '服务未运行，点击一键启用',
+        quick_state_partial: '服务已运行，拦截策略未完成',
+        quick_state_active: '服务与拦截策略已启用',
+        quick_state_busy: '操作进行中，请稍候...',
+        advanced_actions: '高级操作',
         https_label: 'HTTPS',
         hosts_label: 'hosts',
         enabled: '已启用',
@@ -334,7 +373,7 @@
         exec_error: '执行异常：'
       },
       en: {
-        subtitle: 'Wrap local Ollama as OpenAI-compatible API and bypass fixed model restrictions in IDEs.',
+        subtitle: 'Bridge local models and OpenAI-compatible upstreams behind one OpenAI-style API for IDEs like TRAE.',
         toggle_lang: '中文',
         status_btn: 'System Status',
         elevator_title: 'Privileged Bridge Service',
@@ -404,6 +443,13 @@
         revoke_start: 'Revoking policy: stop 443 forwarding/portproxy and clean hosts...',
         revoke_failed: 'Revoke failed: ',
         revoke_done: 'Revoke done',
+        quick_toggle_label: 'Interception Toggle',
+        quick_status_checking: 'Checking status...',
+        quick_state_inactive: 'Service is not running. Click to enable.',
+        quick_state_partial: 'Service is running but interception is not fully applied.',
+        quick_state_active: 'Service and interception are active.',
+        quick_state_busy: 'Processing, please wait...',
+        advanced_actions: 'Advanced Actions',
         https_label: 'HTTPS',
         hosts_label: 'hosts',
         enabled: 'enabled',
@@ -572,19 +618,76 @@
       catch { showToast(t('copy_failed')); }
     }
 
+    let quickSwitchBusy = false;
+
+    async function refreshQuickActionUI() {
+      const stateEl = document.getElementById('quickElevatorState');
+      const sw = document.getElementById('quickElevatorSwitch');
+      if (!stateEl || !sw) return;
+      stateEl.textContent = t('quick_status_checking');
+      try {
+        const [svc, setup] = await Promise.all([
+          fetchJSON('/bridge/setup/elevated-service-status'),
+          fetchJSON('/bridge/setup/status?domain=api.openai.com')
+        ]);
+        const active = !!(svc.ok && setup.hosts_contains);
+        sw.checked = active;
+        stateEl.textContent = svc.ok ? t('quick_state_partial') : t('quick_state_inactive');
+        if (active) stateEl.textContent = t('quick_state_active');
+      } catch {
+        sw.checked = false;
+        stateEl.textContent = t('quick_state_inactive');
+      }
+      sw.disabled = quickSwitchBusy;
+    }
+
+    async function runQuickElevatorAction() {
+      const stateEl = document.getElementById('quickElevatorState');
+      const sw = document.getElementById('quickElevatorSwitch');
+      if (!sw || quickSwitchBusy) return;
+      const targetOn = sw.checked;
+      quickSwitchBusy = true;
+      sw.disabled = true;
+      if (stateEl) stateEl.textContent = t('quick_state_busy');
+      try {
+        if (targetOn) {
+          const installRes = await installElevator();
+          if (!installRes || installRes.ok === false) {
+            sw.checked = false;
+            return;
+          }
+          const applyRes = await oneClickZero();
+          if (!applyRes || applyRes.ok === false) {
+            sw.checked = false;
+          }
+        } else {
+          const revokeRes = await revokeZero();
+          if (!revokeRes || revokeRes.ok === false) {
+            sw.checked = true;
+          }
+        }
+      } finally {
+        quickSwitchBusy = false;
+        await refreshQuickActionUI();
+      }
+    }
+
     // Zero-interaction service
     async function installElevator() {
       const log = document.getElementById('elevatorLog');
       log.textContent = t('installing_elevator') + '\n';
+      let result = { ok: false };
       try {
         const r = await fetch('/bridge/setup/install-elevated-service', { method: 'POST' });
         const j = await r.json();
+        result = j;
         log.textContent += `${j.ok ? '✅' : '❌'} ${j.detail || j.error || ''}\n`;
         if (j.diagnostics) {
           if (j.diagnostics.health_error) log.textContent += `health_error: ${j.diagnostics.health_error}\n`;
           if (j.diagnostics.service) log.textContent += `service: ${j.diagnostics.service}\n`;
           if (j.diagnostics.task) log.textContent += `task: ${j.diagnostics.task}\n`;
-          if (j.diagnostics.install_error) log.textContent += `install_error: ${j.diagnostics.install_error}\n`;
+          if (j.diagnostics.install_warning) log.textContent += `install_warning: ${j.diagnostics.install_warning}\n`;
+          if (!j.ok && j.diagnostics.install_error) log.textContent += `install_error: ${j.diagnostics.install_error}\n`;
         }
         // 合并运行状态输出
         try {
@@ -595,27 +698,37 @@
         }
       } catch (e) {
         log.textContent += t('exec_error') + e + '\n';
-    }
+        result = { ok: false, error: String(e) };
+      }
+      await refreshQuickActionUI();
+      return result;
     }
     async function uninstallElevator() {
       const log = document.getElementById('elevatorLog');
       log.textContent = '正在卸载特权桥接服务...\n';
+      let result = { ok: false };
       try {
         const r = await fetch('/bridge/setup/uninstall-elevated-service', { method: 'POST' });
         const j = await r.json();
+        result = j;
         log.textContent += `${j.ok ? '✅' : '❌'} ${j.detail || j.error || ''}\n`;
       } catch (e) {
         log.textContent += '执行异常：' + e + '\n';
+        result = { ok: false, error: String(e) };
       }
+      await refreshQuickActionUI();
+      return result;
     }
     async function oneClickZero() {
       const log = document.getElementById('elevatorLog');
       log.textContent = t('applying_policy') + '\n';
+      let result = { ok: false };
       try {
         const r = await fetch('/bridge/setup/https-hosts', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domain: 'api.openai.com' })
         });
         const j = await r.json();
+        result = j;
         (j.steps || []).forEach(s => {
           log.textContent += `${s.ok ? '✅' : '❌'} ${s.name}: ${s.detail || ''}\n`;
           if (s.error) log.textContent += `   ↳ 错误: ${s.error}\n`;
@@ -629,17 +742,22 @@
         if (j.port) log.textContent += `${t('service_port_label')}${j.port}\n`;
       } catch (e) {
         log.textContent += t('exec_error') + e + '\n';
+        result = { ok: false, error: String(e) };
       }
+      await refreshQuickActionUI();
+      return result;
     }
 
     async function revokeZero() {
       const log = document.getElementById('elevatorLog');
       log.textContent = t('revoke_start') + '\n';
+      let result = { ok: false };
       try {
         const r = await fetch('/bridge/setup/revoke', {
           method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ domain: 'api.openai.com' })
         });
         const j = await r.json();
+        result = j;
         (j.steps || []).forEach(s => {
           log.textContent += `${s.ok ? '✅' : '❌'} ${s.name}: ${s.detail || ''}\n`;
           if (s.error) log.textContent += `   ↳ 错误: ${s.error}\n`;
@@ -647,7 +765,10 @@
         if (j.ok) log.textContent += t('revoke_done') + '\n';
       } catch (e) {
         log.textContent += t('revoke_failed') + e + '\n';
+        result = { ok: false, error: String(e) };
       }
+      await refreshQuickActionUI();
+      return result;
     }
 
     // Upstream config
@@ -898,6 +1019,7 @@
 
     // Init
     document.getElementById('installElevator').onclick = installElevator;
+    document.getElementById('quickElevatorSwitch').onchange = runQuickElevatorAction;
     document.getElementById('oneClickZero').onclick = oneClickZero;
     document.getElementById('revokeZero').onclick = revokeZero;
     document.getElementById('uninstallElevator').onclick = uninstallElevator;
@@ -921,6 +1043,7 @@
     document.getElementById('checkStatus').onclick = checkStatus;
 
     applyI18N();
+    refreshQuickActionUI();
     loadUpstreamConfig();
     loadModels();
     renderManualModels();

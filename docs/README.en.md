@@ -27,14 +27,17 @@ Wrap local Ollama or a custom OpenAI-compatible upstream into a bridgeable inter
 
 ## Environment Variables
 See `.env.example`:
-- `PORT` (default `3000`)
+- `PORT` (default `30000`)
 - `HTTPS_ENABLED=true|false` (default `false`)
 - `SSL_CERT_FILE`, `SSL_KEY_FILE` (required when HTTPS is enabled)
 - `OLLAMA_BASE_URL` (default `http://127.0.0.1:11434`)
 - `UPSTREAM_TYPE=ollama|openai` (default `ollama`)
-- `UPSTREAM_BASE_URL` (optional override)
+- `UPSTREAM_BASE_URL` (optional)
+  - If empty: defaults to `OLLAMA_BASE_URL` for `ollama`, and `https://api.openai.com` for `openai`.
 - `UPSTREAM_API_KEY` (optional upstream bearer token)
-- `UPSTREAM_CHAT_PATH`, `UPSTREAM_MODELS_PATH` (optional endpoint overrides for non-standard compatible APIs)
+  - If empty, bridge can forward the client's `Authorization` (controlled by `FORWARD_CLIENT_API_KEY`).
+- `UPSTREAM_CHAT_PATH`, `UPSTREAM_MODELS_PATH` (optional endpoint overrides)
+  - In `openai` mode, models endpoint is fixed to `/v1/models` at runtime for compatibility.
 - `FORWARD_CLIENT_API_KEY=true|false` (default `true`)
 - `EXPECTED_API_KEY` (optional fixed key)
 - `ACCEPT_ANY_API_KEY=true|false` (default `true`)
@@ -44,23 +47,29 @@ See `.env.example`:
 ## Quick Start (Windows)
 0. Install Node.js (v18+ recommended) and npm.
 1. Double-click `Start-Bridge.bat` to launch (first run installs dependencies automatically).
-2. Your browser opens `http://localhost:PORT/` (default `PORT=3000`) to show the Web UI.
+2. Your browser opens `http://localhost:PORT/` (default `PORT=30000`) to show the Web UI.
 3. Privileged bridge service from Web UI:
    - Click "Install & Start Service".
    - Click "Apply Intercept Policy".
    - To undo, click "Revoke Policy" or "Uninstall Service".
-4. Web UI upstream models list:
-   - Click "Refresh" to list models from your active upstream target.
-   - Click "Copy" to copy the model name.
-5. Web UI model mappings:
+4. Web UI upstream configuration:
+  - Select `Type`: `ollama` or `openai`.
+  - In `openai` mode, use `Chat Path=/v1/chat/completions` (recommended).
+  - `Models Path` is hidden in UI and fixed to `/v1/models` at runtime.
+  - Fill `Base URL` and optional `API Key`, then click `Save Upstream`.
+5. Web UI model sources (depends on upstream type):
+  - `Type=ollama`: use `Ollama Models` card, click `Refresh`, then `Copy`.
+  - `Type=openai`: use `Manual Models` card to add model names, then `Copy` or `+ Mapping`.
+6. Web UI model mappings:
    - Click "Refresh" to show current mappings.
    - Click "Add Mapping" to add a new mapping row.
      - Enter upstream model name in "Local Model Name" (e.g., `llama2-13b` or `gpt-4o-mini`).
      - Enter a global alias in "Mapping ID" (e.g., `OpenAI-llama2-13b`) to use in IDEs like TRAE.
    - Click "Save" to persist mappings.
    - Click "Delete" to remove a mapping row.
-6. Web UI chat tester:
+7. Web UI chat tester:
    - Choose "Mapping ID" and "Streaming" ("Streaming" or "Non-Streaming").
+  - Optional: fill "Direct Model Name" to send directly to upstream without mapping.
    - Choose "Test Mode": "Explicit Bridge (/v1, local)" or "Transparent Interception (https://api.openai.com)".
    - Click "System Status" to confirm it shows "HTTPS: Enabled · hosts: Written" when testing transparent interception.
    - Optional: enter "API Key". If `EXPECTED_API_KEY` is set and `ACCEPT_ANY_API_KEY=false`, you must enter that exact value.
@@ -77,7 +86,7 @@ See `.env.example`:
 2. In the AI dialog, click `Settings (gear icon) / Models / Add Model`.
 3. Vendor: select `OpenAI`.
 4. Model: choose `Custom Model`.
-5. Model ID: fill the alias defined in Web UI `映射ID` (e.g., `OpenAI-llama2-13b`).
+5. Model ID: fill the alias from Web UI `Mapping ID`, or in `openai` upstream mode use the real upstream model name directly.
 6. API Key: any value works by default. If you set `EXPECTED_API_KEY` in `.env`, you must enter that exact value.
 7. Click `Add Model`.
 8. In the chat, select your custom model.
@@ -89,14 +98,14 @@ See `.env.example`:
 
 ## Modes
 - Transparent Interception: for clients that hard-code `https://api.openai.com`. A system-level 443→PORT mapping combined with local CA and domain certificate handles TLS verification to take over traffic.
-- Explicit Bridge: if the client supports a custom Base URL, use `http://localhost:PORT/v1` or, with HTTPS enabled, `https://localhost:PORT/v1`.
+- Explicit Bridge: if the client supports a custom Base URL, use `http://localhost:30000/v1` (or your configured `PORT`); with HTTPS enabled, use `https://localhost:<PORT>/v1`.
 
 ## Use Third-Party OpenAI-Compatible APIs
 1. Open Web UI and set upstream type to `openai`.
 2. Fill upstream base URL (for example `https://your-provider.example.com`).
 3. Fill upstream API key (or leave empty and let bridge forward the API key from TRAE).
-4. If provider endpoints are non-standard, set custom chat/models paths.
-5. Save, refresh model list, and create mapping aliases for TRAE.
+4. If provider chat endpoint is non-standard, set custom `Chat Path`.
+5. Save, then use `Manual Models` to maintain model names and create mapping aliases for TRAE.
 
 ## FAQ
 - Chat fails in Transparent Interception mode?

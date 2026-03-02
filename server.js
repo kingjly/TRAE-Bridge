@@ -831,7 +831,7 @@ app.post('/bridge/setup/install-elevated-service', async (req, res) => {
       return res.json({
         ok: true,
         detail: '服务已在运行（提权命令返回非零，已按可用状态处理）',
-        diagnostics: { install_error: installError }
+        diagnostics: { install_warning: installError }
       });
     }
 
@@ -843,7 +843,7 @@ app.post('/bridge/setup/install-elevated-service', async (req, res) => {
       return res.json({
         ok: true,
         detail: '服务已在运行（检测到健康状态，忽略提权命令错误）',
-        diagnostics: { install_error: installError }
+        diagnostics: { install_warning: installError }
       });
     }
 

@@ -29,7 +29,7 @@
 
 ## 环境变量
 详见 `.env.example`：
-- `PORT`（默认 3000）  
+- `PORT`（默认 30000）  
   - 桥接服务监听的本地端口，WebUI 与 /v1 端点均在此端口提供
 - `HTTPS_ENABLED=true|false`（默认 `false`）  
   - 是否启用 HTTPS；设为 true 后需同时配置 SSL_CERT_FILE 与 SSL_KEY_FILE
@@ -37,6 +37,16 @@
   - 本地证书文件绝对路径，用于透明拦截 https://api.openai.com 时的 TLS 握手
 - `OLLAMA_BASE_URL`（默认 `http://127.0.0.1:11434`）  
   - Ollama 服务地址，确保桥接能正常访问本地模型
+- `UPSTREAM_TYPE=ollama|openai`（默认 `ollama`）
+  - 上游类型：`ollama` 使用本地 Ollama 协议；`openai` 使用任意 OpenAI 兼容 API
+- `UPSTREAM_BASE_URL`（可选）
+  - 上游基础地址。为空时：`ollama` 默认取 `OLLAMA_BASE_URL`，`openai` 默认取 `https://api.openai.com`
+- `UPSTREAM_API_KEY`（可选）
+  - 指定上游固定密钥（Bearer）。留空时可转发客户端的 `Authorization`（受 `FORWARD_CLIENT_API_KEY` 控制）
+- `UPSTREAM_CHAT_PATH`、`UPSTREAM_MODELS_PATH`（可选）
+  - 自定义上游路径。`openai` 模式下运行时会固定使用 `/v1/models`，避免非标准路径导致兼容问题
+- `FORWARD_CLIENT_API_KEY=true|false`（默认 `true`）
+  - 当 `UPSTREAM_API_KEY` 为空时，是否转发请求方的 `Authorization`
 - `EXPECTED_API_KEY`（固定密钥，可选）  
   - 若设置，则只有携带该密钥的请求才被允许；留空则不校验密钥
 - `ACCEPT_ANY_API_KEY=true|false`（默认 `true`）  
@@ -48,34 +58,39 @@
 
 ## 快速开始（Windows）
 
-</picture>
+<picture>
     <img src="img/WebUI.png" alt="WebUI 预览">
 </picture>
 
 ### 0. 确保已安装 Node.js（建议 v18+）和 npm。
 ### 1. 双击 `Start-Bridge.bat` 启动（首次自动安装依赖）。
-### 2. 浏览器会打开 `http://localhost:PORT/`（默认 `PORT=3000`），进入 WebUI 主界面。
+### 2. 浏览器会打开 `http://localhost:PORT/`（默认 `PORT=30000`），进入 WebUI 主界面。
 ### 3. WebUI 特权桥接服务：
    - 点击 `注册并启动服务` 按钮。
    - 点击 `应用拦截策略` 按钮。
    - 如需撤销，点击 `撤销拦截策略` 或 `卸载服务` 按钮。
-### 4. WebUI Ollama模型列表：
-   - 点击 `刷新列表` 按钮，自动显示本地Ollama模型列表。
-   - 点击 `复制` 按钮，将模型名称复制到剪贴板。
-### 5. WebUI 模型映射：
+### 4. WebUI 上游配置（Upstream API）：
+   - 在 `Type` 中选择 `ollama` 或 `openai`。
+   - `openai` 模式建议 `Chat Path=/v1/chat/completions`；`Models Path` 会在 UI 中隐藏并由系统固定为 `/v1/models`。
+   - 填写 `Base URL`、可选 `API Key` 后点击 `Save Upstream` 保存。
+### 5. WebUI 模型来源（按上游类型）：
+   - 当 `Type=ollama`：可在 `Ollama Models` 卡片点击 `刷新列表`，并通过 `复制` 取本地模型名。
+   - 当 `Type=openai`：使用 `手动模型列表` 卡片录入模型名，可 `复制` 或 `+ 映射` 一键加入映射。
+### 6. WebUI 模型映射：
    - 点击 `刷新列表` 按钮，自动显示当前映射列表。
    - 点击 `新增映射` 按钮，将新增一行映射项。
-     - 本地模型名称 输入框中输入本地 Ollama 模型名称（从Ollama模型列表中复制，例如 `llama2-13b`），
-     - 映射ID 输入框中输入自定义的全局模型名称（用于在TRAE等IDE中调用，例如 `OpenAI-llama2-13b`）。
+  - 本地模型名称 输入框中输入上游模型名称（可来自 Ollama 模型列表，或手动模型列表，例如 `llama2-13b`）。
+  - 映射ID 输入框中输入自定义的全局模型名称（用于在TRAE等IDE中调用，例如 `OpenAI-llama2-13b`）。
    - 点击 `保存` 按钮，将映射项保存到配置文件。
    - 点击 `删除` 按钮，删除当前行映射项。
-### 6. WebUI 聊天测试：
+### 7. WebUI 聊天测试：
    - 选择 `映射ID` 用于测试的模型。
+  - 可选填写 `直接模型名`（不经映射，直接发送到上游）。
    - 选择 `是否流式` 为模型选择合适的输出模式。
      - 若选择`流式响应`，会实时显示模型输出，
      - 若选择`非流式响应`，会等待模型完成后一次性显示。
    - 选择 `测试模式` 用于测试不同的调用模式。
-     - 若选择`显式桥接`，即测试`https://localhost:PORT/v1`。不依赖“注册并启动服务”和“应用拦截策略”。
+      - 若选择`显式桥接`，即测试`http://localhost:PORT/v1`（启用 HTTPS 后为 `https://localhost:PORT/v1`）。不依赖“注册并启动服务”和“应用拦截策略”。
      - 若选择`透明拦截`，即测试 `https://api.openai.com`。需要完成“注册并启动服务”和“应用拦截策略”。确保点击 WebUI 的`系统状态`按钮时，显示“ HTTPS：已启用，hosts：已写入”。
    - 可选输入 `API 密钥`
      - 若在.env中`EXPECTED_API_KEY`定义了值，且`ACCEPT_ANY_API_KEY=false`，则必须输入该值。
@@ -93,19 +108,19 @@
     <img src="img/TRAESetting2.png" alt="TRAE 模型设置2" style="width:49%;display:inline-block;vertical-align:top;">
 </picture>
 
-### 0.  确保已完成 **快速开始（Windows）** 中的所有步骤，并在 聊天测试 中测试成功。
+### 0.  确保已完成 **快速开始（Windows）** 中的所有步骤，并在聊天测试中测试成功。
 ### 1.  打开并登录 Trae IDE。
 ### 2.  在 AI 对话框中，点击 `设置图标（齿轮图标）/模型/添加模型` 。
 ### 3.  **服务商**：选择 `OpenAI`。
 ### 4.  **模型**：选择 `自定义模型`。
-### 5.  **模型 ID**：填写在 WebUI 模型映射中 `映射ID` 输入框中定义的值 (例如: `OpenAI-llama2-13b`)。
+### 5.  **模型 ID**：填写 WebUI 中的 `映射ID`，或在 `openai` 上游模式下直接填写真实上游模型名。
 ### 6.  **API 密钥**：若在.env中`EXPECTED_API_KEY`定义了值，且`ACCEPT_ANY_API_KEY=false`，则必须输入该值。若在.env中`ACCEPT_ANY_API_KEY=true`，则可以输入任意值。
 ### 7.  点击 `添加模型` 按钮。
 ### 8.  回到 AI 聊天框，选择自定义模型。
 
 ## 使用模式
 - 透明拦截：适用于固定访问 `https://api.openai.com` 的 TRAE 和其他部分IDE客户端。系统级 443→PORT 映射配合本地 CA + 域证书完成 TLS 校验，实现透明接管。
-- 显式桥接：若客户端支持自定义 Base URL，使用 `http://localhost:PORT/v1` 或启用 HTTPS 后的 `https://localhost:PORT/v1`。
+- 显式桥接：若客户端支持自定义 Base URL，使用 `http://localhost:30000/v1`（或你在 `.env` 中设置的端口）；启用 HTTPS 后使用 `https://localhost:<PORT>/v1`。
 
 ## 常见问题与故障排查（FAQ）
 - 透明拦截模式聊天失败？
