@@ -117,12 +117,67 @@
         </div>
 
         <div class="card">
+          <h3>Upstream API</h3>
+          <p>Switch between local Ollama and any OpenAI-compatible third-party API.</p>
+          <div class="split">
+            <div>
+              <label>Type</label>
+              <select class="select" id="upstreamType">
+                <option value="ollama">ollama</option>
+                <option value="openai">openai</option>
+              </select>
+            </div>
+            <div>
+              <label>Base URL</label>
+              <input class="input" id="upstreamBaseUrl" placeholder="http://127.0.0.1:11434 or https://provider.example.com" />
+            </div>
+          </div>
+          <div class="split" style="margin-top:8px">
+            <div>
+              <label>API Key (optional)</label>
+              <input class="input" id="upstreamApiKey" type="text" placeholder="Leave empty to forward TRAE Authorization header" />
+            </div>
+            <div>
+              <label>Chat Path</label>
+              <input class="input" id="upstreamChatPath" placeholder="/api/chat or /v1/chat/completions" />
+            </div>
+          </div>
+          <div class="split" style="margin-top:8px">
+            <div id="upstreamModelsPathWrap">
+              <label>Models Path</label>
+              <input class="input" id="upstreamModelsPath" placeholder="/api/tags or /v1/models" />
+            </div>
+            <div style="display:flex; align-items:flex-end; gap:8px;">
+              <button class="btn secondary" id="refreshUpstream">Refresh</button>
+              <button class="btn" id="saveUpstream">Save Upstream</button>
+            </div>
+          </div>
+          <div id="upstreamLog" class="log" style="margin-top:10px; height:90px"></div>
+        </div>
+
+        <div class="card" id="modelsCard">
           <h3 data-i18n="models_title">Ollama 模型列表</h3>
           <p data-i18n="models_desc">扫描本地 Ollama 模型；点击右侧按钮复制本地模型名称。</p>
           <div id="modelsList" class="list"></div>
           <div class="row" style="margin-top:10px">
             <button class="btn secondary" id="refreshModels" data-i18n="refresh_models">刷新列表</button>
           </div>
+        </div>
+
+        <div class="card" id="manualModelsCard" style="display:none;">
+          <h3 data-i18n="manual_models_title">手动模型列表</h3>
+          <p data-i18n="manual_models_desc">OpenAI 兼容上游请手动录入模型名；可复制或一键加入映射。</p>
+          <div class="split">
+            <div>
+              <label data-i18n="manual_model_label">模型名称</label>
+              <input class="input" id="manualModelInput" data-i18n="manual_model_placeholder" placeholder="如：gpt-4o-mini" />
+            </div>
+            <div style="display:flex; align-items:flex-end; gap:8px;">
+              <button class="btn" id="addManualModel" data-i18n="manual_add">添加</button>
+              <button class="btn secondary" id="clearManualModels" data-i18n="manual_clear">清空</button>
+            </div>
+          </div>
+          <div id="manualModelsList" class="list" style="margin-top:10px"></div>
         </div>
 
         <div class="card">
@@ -175,6 +230,12 @@
               <input id="chatApiKey" class="input" type="text" data-i18n="chat_api_key_placeholder" placeholder="可选：输入用于校验的密钥" />
             </div>
           </div>
+          <div class="row" style="margin-top:8px; display:none" id="chatDirectModelWrap">
+            <div style="flex:1">
+              <label data-i18n="chat_direct_model_label">直接模型名（可选）</label>
+              <input id="chatDirectModel" class="input" type="text" data-i18n="chat_direct_model_placeholder" placeholder="如：gpt-4o-mini" />
+            </div>
+          </div>
           <div id="chatView" class="chat" style="margin-top:10px"></div>
           <textarea id="chatInput" class="textarea" placeholder="输入你的问题..." style="margin-top:10px"></textarea>
           <div class="row" style="margin-top:10px">
@@ -205,6 +266,18 @@
         models_title: 'Ollama 模型列表',
         models_desc: '扫描本地 Ollama 模型；点击右侧按钮复制本地模型名称。',
         refresh_models: '刷新列表',
+        manual_models_title: '手动模型列表',
+        manual_models_desc: 'OpenAI 兼容上游请手动录入模型名；可复制或一键加入映射。',
+        manual_model_label: '模型名称',
+        manual_model_placeholder: '如：gpt-4o-mini',
+        manual_add: '添加',
+        manual_clear: '清空',
+        manual_empty: '还没有手动模型，请先添加。',
+        manual_model_exists: '该模型已存在',
+        manual_model_invalid: '请输入模型名称',
+        manual_model_added: '模型已添加',
+        manual_model_removed: '模型已删除',
+        add_mapping_from_model: '加入映射',
         mappings_title: '模型映射',
         mappings_desc: '将本地 Ollama模型ID 映射到 OpenAI模型形式ID。',
         refresh_mappings: '刷新列表',
@@ -221,6 +294,8 @@
         mode_intercept: '透明拦截（https://api.openai.com）',
         chat_api_key_label: 'API Key',
         chat_api_key_placeholder: '可选：输入用于校验的密钥',
+        chat_direct_model_label: '直接模型名（可选）',
+        chat_direct_model_placeholder: '如：gpt-4o-mini',
         stream_true: '流式',
         stream_false: '非流式',
         send: '发送',
@@ -268,11 +343,23 @@
         uninstall_service: 'Uninstall Service',
         apply_policy: 'Apply Intercept Policy',
         revoke_policy: 'Revoke Policy',
-        models_title: 'Ollama Models',
-        models_desc: 'Scan local Ollama models; use the button to copy model names.',
+        models_title: 'Upstream Models',
+        models_desc: 'Load models from the active upstream target; use copy to paste model IDs.',
         refresh_models: 'Refresh',
+        manual_models_title: 'Manual Model List',
+        manual_models_desc: 'For OpenAI-compatible upstreams, add model names manually and map them quickly.',
+        manual_model_label: 'Model Name',
+        manual_model_placeholder: 'e.g., gpt-4o-mini',
+        manual_add: 'Add',
+        manual_clear: 'Clear',
+        manual_empty: 'No manual models yet. Add one first.',
+        manual_model_exists: 'Model already exists',
+        manual_model_invalid: 'Please enter a model name',
+        manual_model_added: 'Model added',
+        manual_model_removed: 'Model removed',
+        add_mapping_from_model: 'Add Mapping',
         mappings_title: 'Model Mappings',
-        mappings_desc: 'Map local Ollama model IDs to OpenAI-style IDs.',
+        mappings_desc: 'Map upstream model IDs to OpenAI-style aliases.',
         refresh_mappings: 'Refresh',
         add_mapping: '+ Add Mapping',
         map_id: 'Mapping ID',
@@ -287,6 +374,8 @@
         mode_intercept: 'Transparent Interception (https://api.openai.com)',
         chat_api_key_label: 'API Key',
         chat_api_key_placeholder: 'Optional: enter API key',
+        chat_direct_model_label: 'Direct Model Name (optional)',
+        chat_direct_model_placeholder: 'e.g., gpt-4o-mini',
         stream_true: 'Streaming',
         stream_false: 'Non-streaming',
         send: 'Send',
@@ -339,7 +428,131 @@
       if (m && m.options.length >= 2) { m.options[0].text = t('mode_bridge'); m.options[1].text = t('mode_intercept'); }
       const input = document.getElementById('chatInput'); if (input) input.placeholder = t('chat_input_placeholder');
     }
-    function toggleLang(){ currentLang = currentLang === 'zh' ? 'en' : 'zh'; localStorage.setItem('lang', currentLang); applyI18N(); }
+    function toggleLang(){ currentLang = currentLang === 'zh' ? 'en' : 'zh'; localStorage.setItem('lang', currentLang); applyI18N(); renderManualModels(); }
+
+    let currentUpstreamType = 'ollama';
+    const MANUAL_MODELS_KEY = 'manual_openai_models';
+
+    function normalizeModelName(v) {
+      return String(v || '').trim();
+    }
+
+    function getManualModels() {
+      try {
+        const raw = localStorage.getItem(MANUAL_MODELS_KEY);
+        const arr = JSON.parse(raw || '[]');
+        if (!Array.isArray(arr)) return [];
+        const uniq = [];
+        const seen = new Set();
+        arr.forEach(m => {
+          const name = normalizeModelName(m);
+          if (!name || seen.has(name)) return;
+          seen.add(name);
+          uniq.push(name);
+        });
+        return uniq;
+      } catch {
+        return [];
+      }
+    }
+
+    function setManualModels(models) {
+      localStorage.setItem(MANUAL_MODELS_KEY, JSON.stringify(models));
+    }
+
+    function addManualModelEntry(modelName) {
+      const name = normalizeModelName(modelName);
+      if (!name) { showToast(t('manual_model_invalid')); return false; }
+      const list = getManualModels();
+      if (list.includes(name)) { showToast(t('manual_model_exists')); return false; }
+      list.push(name);
+      setManualModels(list);
+      renderManualModels();
+      showToast(t('manual_model_added'));
+      return true;
+    }
+
+    function removeManualModelEntry(modelName) {
+      const name = normalizeModelName(modelName);
+      const next = getManualModels().filter(m => m !== name);
+      setManualModels(next);
+      renderManualModels();
+      showToast(t('manual_model_removed'));
+    }
+
+    function addMappingRowFromModel(modelName) {
+      const body = document.getElementById('mappingsBody');
+      const guessId = `OpenAI-${modelName}`;
+      body.appendChild(createMappingRow({ id: guessId, model: modelName }));
+    }
+
+    function renderManualModels() {
+      const listEl = document.getElementById('manualModelsList');
+      if (!listEl) return;
+      const models = getManualModels();
+      listEl.innerHTML = '';
+      if (models.length === 0) {
+        const div = document.createElement('div');
+        div.className = 'item';
+        div.innerHTML = `<div class="meta"><strong>${t('manual_empty')}</strong></div>`;
+        listEl.appendChild(div);
+        return;
+      }
+
+      models.forEach(modelName => {
+        const div = document.createElement('div');
+        div.className = 'item';
+        const safe = modelName.replace(/"/g, '&quot;');
+        div.innerHTML = `<div class="meta"><strong>${safe}</strong></div>`;
+
+        const actionWrap = document.createElement('div');
+        actionWrap.className = 'row';
+        actionWrap.style.gap = '8px';
+
+        const mapBtn = document.createElement('button');
+        mapBtn.className = 'btn secondary';
+        mapBtn.textContent = t('add_mapping_from_model');
+        mapBtn.onclick = () => addMappingRowFromModel(modelName);
+
+        const copyBtn = document.createElement('button');
+        copyBtn.className = 'copy';
+        copyBtn.textContent = t('copy');
+        copyBtn.onclick = () => copyText(modelName);
+
+        const delBtn = document.createElement('button');
+        delBtn.className = 'btn secondary';
+        delBtn.textContent = t('delete');
+        delBtn.onclick = () => removeManualModelEntry(modelName);
+
+        actionWrap.appendChild(mapBtn);
+        actionWrap.appendChild(copyBtn);
+        actionWrap.appendChild(delBtn);
+        div.appendChild(actionWrap);
+        listEl.appendChild(div);
+      });
+    }
+
+    function updateModeUI(type) {
+      currentUpstreamType = (type === 'openai') ? 'openai' : 'ollama';
+      const isOpenAI = currentUpstreamType === 'openai';
+      const modelsCard = document.getElementById('modelsCard');
+      const manualModelsCard = document.getElementById('manualModelsCard');
+      const chatDirectModelWrap = document.getElementById('chatDirectModelWrap');
+      const upstreamModelsPathWrap = document.getElementById('upstreamModelsPathWrap');
+      const upstreamChatPath = document.getElementById('upstreamChatPath');
+      const upstreamModelsPath = document.getElementById('upstreamModelsPath');
+      if (modelsCard) modelsCard.style.display = isOpenAI ? 'none' : '';
+      if (manualModelsCard) manualModelsCard.style.display = isOpenAI ? '' : 'none';
+      if (chatDirectModelWrap) chatDirectModelWrap.style.display = isOpenAI ? '' : 'none';
+      if (upstreamModelsPathWrap) upstreamModelsPathWrap.style.display = isOpenAI ? 'none' : '';
+      if (isOpenAI) {
+        if (upstreamChatPath && !String(upstreamChatPath.value || '').trim()) {
+          upstreamChatPath.value = '/v1/chat/completions';
+        }
+        if (upstreamModelsPath) upstreamModelsPath.value = '/v1/models';
+      }
+      if (isOpenAI) renderManualModels();
+    }
 
     // Utilities
     function showToast(msg) {
@@ -366,7 +579,13 @@
       try {
         const r = await fetch('/bridge/setup/install-elevated-service', { method: 'POST' });
         const j = await r.json();
-        log.textContent += `${j.ok ? '✅' : '❌'} ${j.detail || ''}\n`;
+        log.textContent += `${j.ok ? '✅' : '❌'} ${j.detail || j.error || ''}\n`;
+        if (j.diagnostics) {
+          if (j.diagnostics.health_error) log.textContent += `health_error: ${j.diagnostics.health_error}\n`;
+          if (j.diagnostics.service) log.textContent += `service: ${j.diagnostics.service}\n`;
+          if (j.diagnostics.task) log.textContent += `task: ${j.diagnostics.task}\n`;
+          if (j.diagnostics.install_error) log.textContent += `install_error: ${j.diagnostics.install_error}\n`;
+        }
         // 合并运行状态输出
         try {
           const st = await fetchJSON('/bridge/setup/elevated-service-status');
@@ -384,7 +603,7 @@
       try {
         const r = await fetch('/bridge/setup/uninstall-elevated-service', { method: 'POST' });
         const j = await r.json();
-        log.textContent += `${j.ok ? '✅' : '❌'} ${j.detail || ''}\n`;
+        log.textContent += `${j.ok ? '✅' : '❌'} ${j.detail || j.error || ''}\n`;
       } catch (e) {
         log.textContent += '执行异常：' + e + '\n';
       }
@@ -401,6 +620,12 @@
           log.textContent += `${s.ok ? '✅' : '❌'} ${s.name}: ${s.detail || ''}\n`;
           if (s.error) log.textContent += `   ↳ 错误: ${s.error}\n`;
         });
+        if (j.restart_required) {
+          log.textContent += '⚠️ 检测到主桥接进程仍在 HTTP 模式，请重启主桥接服务后再测试透明拦截。\n';
+        }
+        if (j.auto_restart_triggered) {
+          log.textContent += '🔄 已自动重启主桥接服务，请等待 5-10 秒后刷新页面。\n';
+        }
         if (j.port) log.textContent += `${t('service_port_label')}${j.port}\n`;
       } catch (e) {
         log.textContent += t('exec_error') + e + '\n';
@@ -425,20 +650,83 @@
       }
     }
 
+    // Upstream config
+    async function loadUpstreamConfig() {
+      const log = document.getElementById('upstreamLog');
+      try {
+        const j = await fetchJSON('/bridge/upstream');
+        const cfg = j.config || {};
+        document.getElementById('upstreamType').value = cfg.type || 'ollama';
+        document.getElementById('upstreamBaseUrl').value = cfg.base_url || '';
+        document.getElementById('upstreamApiKey').value = cfg.api_key || '';
+        document.getElementById('upstreamChatPath').value = cfg.chat_path || (cfg.type === 'openai' ? '/v1/chat/completions' : '');
+        document.getElementById('upstreamModelsPath').value = cfg.models_path || '';
+        updateModeUI(cfg.type || 'ollama');
+        log.textContent = `upstream type: ${cfg.type || 'ollama'}\nbase: ${cfg.base_url || ''}\nchat: ${cfg.chat_path || ''}\nmodels: ${cfg.models_path || ''}`;
+      } catch (e) {
+        log.textContent = 'load upstream config failed: ' + e;
+      }
+    }
+
+    async function saveUpstreamConfig() {
+      const log = document.getElementById('upstreamLog');
+      const payload = {
+        type: document.getElementById('upstreamType').value,
+        base_url: document.getElementById('upstreamBaseUrl').value.trim(),
+        api_key: document.getElementById('upstreamApiKey').value.trim(),
+        chat_path: document.getElementById('upstreamChatPath').value.trim(),
+        models_path: document.getElementById('upstreamType').value === 'openai' ? '/v1/models' : document.getElementById('upstreamModelsPath').value.trim(),
+      };
+      try {
+        const j = await fetchJSON('/bridge/upstream', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload),
+        });
+        const cfg = j.config || {};
+        updateModeUI(cfg.type || 'ollama');
+        log.textContent = `saved\nupstream type: ${cfg.type}\nbase: ${cfg.base_url}\nchat: ${cfg.chat_path}\nmodels: ${cfg.models_path}`;
+        showToast('Upstream saved');
+        if ((cfg.type || '').toLowerCase() === 'openai') {
+          renderManualModels();
+        } else {
+          await loadModels();
+        }
+      } catch (e) {
+        log.textContent = 'save upstream failed: ' + e;
+        showToast('Save upstream failed');
+      }
+    }
+
     // Models
     async function loadModels() {
+      if (currentUpstreamType === 'openai') {
+        renderManualModels();
+        return;
+      }
       try {
-        const j = await fetchJSON('/bridge/ollama/models');
+        const j = await fetchJSON('/bridge/upstream/models');
         const list = document.getElementById('modelsList');
         list.innerHTML = '';
-        j.models.forEach(m => {
+        const models = Array.isArray(j.models) ? j.models : [];
+        models.forEach(m => {
+          const modelName = m.name || m.id || '';
+          const tags = [];
+          if (typeof m.size === 'number' && Number.isFinite(m.size)) tags.push(`${(m.size/1024/1024).toFixed(1)} MB`);
+          if (m.owned_by) tags.push(m.owned_by);
           const div = document.createElement('div'); div.className = 'item';
-          div.innerHTML = `<div class="meta"><strong>${m.name}</strong><span class="tag">${(m.size/1024/1024).toFixed(1)} MB</span></div>`;
+          div.innerHTML = `<div class="meta"><strong>${modelName}</strong>${tags.map(tag => `<span class="tag">${tag}</span>`).join('')}</div>`;
           const btn = document.createElement('button'); btn.className = 'copy'; btn.setAttribute('data-i18n','copy'); btn.textContent = t('copy');
-          btn.onclick = () => copyText(m.name);
+          btn.onclick = () => copyText(modelName);
           div.appendChild(btn);
           list.appendChild(div);
         });
+        if (models.length === 0) {
+          const div = document.createElement('div');
+          div.className = 'item';
+          div.innerHTML = '<div class="meta"><strong>No models found</strong></div>';
+          list.appendChild(div);
+        }
         applyI18N();
       } catch (e) {
         showToast(t('load_models_failed'));
@@ -547,13 +835,16 @@
       view.scrollTop = view.scrollHeight;
     }
     async function sendChat() {
-      const model = document.getElementById('chatModel').value || document.getElementById('chatModel').textContent;
+      const mappedModel = document.getElementById('chatModel').value || '';
+      const directModel = (document.getElementById('chatDirectModel')?.value || '').trim();
+      const model = mappedModel || directModel;
       const stream = document.getElementById('chatStream').value === 'true';
       const mode = (document.getElementById('chatMode')?.value) || 'bridge';
       const apiKey = (document.getElementById('chatApiKey')?.value || '').trim();
       const input = document.getElementById('chatInput');
       const text = input.value.trim();
       if (!text) return;
+      if (!model) { showToast(t('manual_model_invalid')); return; }
       chatMsgs.push({ role: 'user', content: text });
       renderChat(); input.value = '';
       try {
@@ -611,6 +902,18 @@
     document.getElementById('revokeZero').onclick = revokeZero;
     document.getElementById('uninstallElevator').onclick = uninstallElevator;
     document.getElementById('toggleLang').onclick = toggleLang;
+    document.getElementById('refreshUpstream').onclick = loadUpstreamConfig;
+    document.getElementById('saveUpstream').onclick = saveUpstreamConfig;
+    document.getElementById('upstreamType').onchange = (e) => updateModeUI(e.target.value);
+    document.getElementById('addManualModel').onclick = () => {
+      const input = document.getElementById('manualModelInput');
+      const ok = addManualModelEntry(input.value);
+      if (ok) input.value = '';
+    };
+    document.getElementById('clearManualModels').onclick = () => {
+      setManualModels([]);
+      renderManualModels();
+    };
     document.getElementById('refreshModels').onclick = loadModels;
     document.getElementById('refreshMappings').onclick = loadMappings;
     document.getElementById('sendChat').onclick = sendChat;
@@ -618,7 +921,9 @@
     document.getElementById('checkStatus').onclick = checkStatus;
 
     applyI18N();
+    loadUpstreamConfig();
     loadModels();
+    renderManualModels();
     loadMappings();
     renderChat();
   </script>

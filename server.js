@@ -8,7 +8,7 @@ const http = require('http');
 const https = require('https');
 const os = require('os');
 const { v4: uuidv4 } = require('uuid');
-const { exec } = require('child_process');
+const { exec, spawn } = require('child_process');
 const forge = require('node-forge');
 require('dotenv').config();
 
@@ -18,7 +18,13 @@ app.use(cors());
 app.use(morgan('tiny'));
 
 const OLLAMA_BASE_URL = process.env.OLLAMA_BASE_URL || 'http://127.0.0.1:11434';
-const PORT = Number(process.env.PORT || 3000);
+const UPSTREAM_TYPE = process.env.UPSTREAM_TYPE || '';
+const UPSTREAM_BASE_URL = process.env.UPSTREAM_BASE_URL || '';
+const UPSTREAM_API_KEY = process.env.UPSTREAM_API_KEY || '';
+const UPSTREAM_CHAT_PATH = process.env.UPSTREAM_CHAT_PATH || '';
+const UPSTREAM_MODELS_PATH = process.env.UPSTREAM_MODELS_PATH || '';
+const FORWARD_CLIENT_API_KEY = String(process.env.FORWARD_CLIENT_API_KEY || 'true').toLowerCase() === 'true';
+const PORT = Number(process.env.PORT || 30000);
 const HTTPS_ENABLED = String(process.env.HTTPS_ENABLED || 'false').toLowerCase() === 'true';
 const SSL_CERT_FILE = process.env.SSL_CERT_FILE || '';
 const SSL_KEY_FILE = process.env.SSL_KEY_FILE || '';
@@ -32,10 +38,53 @@ const CERTS_DIR = path.join(__dirname, 'certs');
 const CA_CERT_FILE = path.join(CERTS_DIR, 'local-ca.pem');
 const CA_KEY_FILE = path.join(CERTS_DIR, 'local-ca-key.pem');
 const MODELS_FILE = path.join(DATA_DIR, 'models.json');
+const UPSTREAM_FILE = path.join(DATA_DIR, 'upstream.json');
+
+function normalizeUpstreamType(type) {
+  const t = String(type || '').trim().toLowerCase();
+  return (t === 'openai' || t === 'openai_compatible') ? 'openai' : 'ollama';
+}
+
+function normalizePathValue(input, fallbackValue) {
+  const raw = String(input || fallbackValue || '').trim();
+  if (!raw) return String(fallbackValue || '');
+  return raw.startsWith('/') ? raw : `/${raw}`;
+}
+
+function defaultUpstreamConfig() {
+  const type = normalizeUpstreamType(UPSTREAM_TYPE || 'ollama');
+  const defaultBase = type === 'openai' ? 'https://api.openai.com' : OLLAMA_BASE_URL;
+  return {
+    type,
+    base_url: String(UPSTREAM_BASE_URL || defaultBase).trim().replace(/\/+$/, ''),
+    api_key: String(UPSTREAM_API_KEY || ''),
+    chat_path: normalizePathValue(UPSTREAM_CHAT_PATH, type === 'openai' ? '/v1/chat/completions' : '/api/chat'),
+    models_path: normalizePathValue(UPSTREAM_MODELS_PATH, type === 'openai' ? '/v1/models' : '/api/tags'),
+  };
+}
+
+function sanitizeUpstreamConfig(input, baseConfig) {
+  const base = Object.assign({}, baseConfig || defaultUpstreamConfig());
+  const type = normalizeUpstreamType(input?.type ?? base.type);
+  const defaultBase = type === 'openai' ? 'https://api.openai.com' : OLLAMA_BASE_URL;
+  const cfg = {
+    type,
+    base_url: String(input?.base_url ?? base.base_url ?? defaultBase).trim().replace(/\/+$/, ''),
+    api_key: String(input?.api_key ?? base.api_key ?? ''),
+    chat_path: normalizePathValue(input?.chat_path ?? base.chat_path, type === 'openai' ? '/v1/chat/completions' : '/api/chat'),
+    models_path: normalizePathValue(input?.models_path ?? base.models_path, type === 'openai' ? '/v1/models' : '/api/tags'),
+  };
+  if (type === 'openai') cfg.models_path = '/v1/models';
+  if (!cfg.base_url) cfg.base_url = defaultBase;
+  return cfg;
+}
 
 function ensureDataDir() {
   if (!fs.existsSync(DATA_DIR)) fs.mkdirSync(DATA_DIR, { recursive: true });
   if (!fs.existsSync(MODELS_FILE)) fs.writeFileSync(MODELS_FILE, JSON.stringify({ mappings: [] }, null, 2));
+  if (!fs.existsSync(UPSTREAM_FILE)) {
+    fs.writeFileSync(UPSTREAM_FILE, JSON.stringify({ config: defaultUpstreamConfig() }, null, 2));
+  }
 }
 ensureDataDir();
 
@@ -56,6 +105,59 @@ function readMappings() {
 
 function writeMappings(mappings) {
   fs.writeFileSync(MODELS_FILE, JSON.stringify({ mappings }, null, 2));
+}
+
+function readUpstreamConfig() {
+  const fallback = defaultUpstreamConfig();
+  try {
+    const raw = fs.readFileSync(UPSTREAM_FILE, 'utf8');
+    const j = JSON.parse(raw);
+    return sanitizeUpstreamConfig(j?.config || {}, fallback);
+  } catch (e) {
+    return fallback;
+  }
+}
+
+function writeUpstreamConfig(config) {
+  const safe = sanitizeUpstreamConfig(config, defaultUpstreamConfig());
+  const persisted = Object.assign({}, safe);
+  if (persisted.type === 'openai') {
+    // For OpenAI-compatible upstreams, models endpoint is fixed at runtime.
+    // Keep persisted config minimal to avoid confusing users with hidden fields.
+    delete persisted.models_path;
+  }
+  fs.writeFileSync(UPSTREAM_FILE, JSON.stringify({ config: persisted }, null, 2));
+  return safe;
+}
+
+function resolveModelAlias(requestedModelId) {
+  const mappings = readMappings();
+  const mapping = mappings.find(m => m.id === requestedModelId);
+  return {
+    mapping,
+    upstreamModel: mapping ? mapping.model : requestedModelId,
+  };
+}
+
+function buildUpstreamUrl(baseUrl, endpointPath) {
+  const base = String(baseUrl || '').trim().replace(/\/+$/, '');
+  const p = normalizePathValue(endpointPath, '/');
+  if (!base) throw new Error('Upstream base_url is required');
+  if (/\/v1$/i.test(base) && /^\/v1\//i.test(p)) {
+    return base + p.replace(/^\/v1/i, '');
+  }
+  return base + p;
+}
+
+function buildUpstreamHeaders(req, upstream, includeContentType = true) {
+  const headers = {};
+  if (includeContentType) headers['Content-Type'] = 'application/json';
+  if (upstream.api_key) {
+    headers['Authorization'] = `Bearer ${upstream.api_key}`;
+  } else if (FORWARD_CLIENT_API_KEY && typeof req.headers.authorization === 'string' && req.headers.authorization.trim()) {
+    headers['Authorization'] = req.headers.authorization.trim();
+  }
+  return headers;
 }
 
 function stripThink(content) {
@@ -105,38 +207,124 @@ app.delete('/bridge/models/:id', (req, res) => {
   res.json({ ok: true });
 });
 
-// Admin: list Ollama models
+async function parseResponsePayload(response) {
+  const text = await response.text();
+  if (!text) return { text: '', json: null };
+  try {
+    return { text, json: JSON.parse(text) };
+  } catch (e) {
+    return { text, json: null };
+  }
+}
+
+async function fetchUpstreamModelList(req, upstream) {
+  const upstreamUrl = buildUpstreamUrl(upstream.base_url, upstream.models_path);
+  const r = await fetch(upstreamUrl, {
+    method: 'GET',
+    headers: buildUpstreamHeaders(req, upstream, false),
+  });
+  const { text, json } = await parseResponsePayload(r);
+  if (!r.ok) {
+    return {
+      ok: false,
+      status: r.status,
+      error: json || text || `Upstream request failed (${r.status})`,
+    };
+  }
+
+  if (upstream.type === 'openai') {
+    const data = Array.isArray(json?.data) ? json.data : [];
+    const models = data
+      .map(m => ({
+        id: String(m?.id || m?.name || '').trim(),
+        name: String(m?.id || m?.name || '').trim(),
+        owned_by: m?.owned_by || 'openai',
+      }))
+      .filter(m => m.id);
+    return { ok: true, status: r.status, raw: json, models };
+  }
+
+  const models = Array.isArray(json?.models)
+    ? json.models.map(m => ({ id: m.name, name: m.name, size: m.size, modified_at: m.modified_at, owned_by: 'ollama' }))
+    : [];
+  return { ok: true, status: r.status, raw: json, models };
+}
+
+// Admin: read/write active upstream settings
+app.get('/bridge/upstream', (req, res) => {
+  res.json({ config: readUpstreamConfig() });
+});
+
+app.post('/bridge/upstream', (req, res) => {
+  try {
+    const current = readUpstreamConfig();
+    const next = writeUpstreamConfig({
+      type: req.body?.type ?? current.type,
+      base_url: req.body?.base_url ?? current.base_url,
+      api_key: req.body?.api_key ?? current.api_key,
+      chat_path: req.body?.chat_path ?? current.chat_path,
+      models_path: req.body?.models_path ?? current.models_path,
+    });
+    res.json({ ok: true, config: next });
+  } catch (e) {
+    res.status(400).json({ ok: false, error: String(e) });
+  }
+});
+
+// Admin: list upstream models (works for Ollama and OpenAI-compatible services)
+app.get('/bridge/upstream/models', async (req, res) => {
+  try {
+    const upstream = readUpstreamConfig();
+    const result = await fetchUpstreamModelList(req, upstream);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    res.json({ upstream: upstream.type, models: result.models });
+  } catch (e) {
+    res.status(500).json({ error: String(e) });
+  }
+});
+
+// Backward compatibility for existing UI path
 app.get('/bridge/ollama/models', async (req, res) => {
   try {
-    const r = await fetch(`${OLLAMA_BASE_URL}/api/tags`);
-    const j = await r.json();
-    const list = (j.models || []).map(m => ({ name: m.name, size: m.size, modified_at: m.modified_at }));
-    res.json({ models: list });
+    const upstream = readUpstreamConfig();
+    const result = await fetchUpstreamModelList(req, upstream);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    res.json({ upstream: upstream.type, models: result.models });
   } catch (e) {
     res.status(500).json({ error: String(e) });
   }
 });
 
 // OpenAI-compatible: GET /v1/models
-app.get('/v1/models', authMiddleware, (req, res) => {
+app.get('/v1/models', authMiddleware, async (req, res) => {
+  const upstream = readUpstreamConfig();
   const mappings = readMappings();
-  const data = mappings.map(m => ({ id: m.id, object: 'model', owned_by: 'ollama' }));
-  res.json({ object: 'list', data });
+  if (mappings.length > 0) {
+    const data = mappings.map(m => ({ id: m.id, object: 'model', owned_by: upstream.type }));
+    return res.json({ object: 'list', data });
+  }
+
+  try {
+    const result = await fetchUpstreamModelList(req, upstream);
+    if (!result.ok) return res.status(result.status).json({ error: result.error });
+    const data = (result.models || []).map(m => ({ id: m.id || m.name, object: 'model', owned_by: m.owned_by || upstream.type }));
+    return res.json({ object: 'list', data });
+  } catch (e) {
+    return res.status(500).json({ error: String(e) });
+  }
 });
 
 // Utility: translate OpenAI Chat payload to Ollama payload
-function toOllamaChatPayload(body) {
-  const { model, messages, temperature, top_p, max_tokens, stop } = body || {};
-  const mappings = readMappings();
-  const mapping = mappings.find(m => m.id === model);
-  const localModel = mapping ? mapping.model : model; // allow direct pass-through if no mapping
+function toOllamaChatPayload(body, mappingResult) {
+  const { messages, temperature, top_p, max_tokens, stop } = body || {};
+  const mapping = mappingResult?.mapping;
+  const localModel = mappingResult?.upstreamModel || body?.model;
   const options = Object.assign({}, mapping?.options || {}, {
     temperature: temperature ?? mapping?.options?.temperature,
     top_p: top_p ?? mapping?.options?.top_p,
     num_predict: typeof max_tokens === 'number' ? max_tokens : (mapping?.options?.num_predict),
     stop: stop ?? mapping?.options?.stop,
   });
-  // remove undefineds
   Object.keys(options).forEach(k => options[k] === undefined && delete options[k]);
   return {
     model: localModel,
@@ -144,6 +332,52 @@ function toOllamaChatPayload(body) {
     stream: Boolean(body.stream),
     options,
   };
+}
+
+async function proxyOpenAICompatibleChat(req, res, upstream, body, modelAlias) {
+  const targetBody = Object.assign({}, body, { model: modelAlias.upstreamModel || body.model });
+  const stream = Boolean(body.stream);
+  const upstreamUrl = buildUpstreamUrl(upstream.base_url, upstream.chat_path);
+  const upstreamResponse = await fetch(upstreamUrl, {
+    method: 'POST',
+    headers: buildUpstreamHeaders(req, upstream, true),
+    body: JSON.stringify(targetBody),
+  });
+
+  if (stream) {
+    if (!upstreamResponse.ok) {
+      const { text, json } = await parseResponsePayload(upstreamResponse);
+      return res.status(upstreamResponse.status).json(json || { error: text || 'Upstream stream request failed' });
+    }
+
+    res.status(upstreamResponse.status);
+    res.set({
+      'Content-Type': upstreamResponse.headers.get('content-type') || 'text/event-stream',
+      'Cache-Control': upstreamResponse.headers.get('cache-control') || 'no-cache',
+      'Connection': 'keep-alive',
+      'X-Accel-Buffering': 'no',
+    });
+
+    if (!upstreamResponse.body) return res.end();
+    upstreamResponse.body.on('error', () => {
+      if (!res.writableEnded) res.end();
+    });
+    upstreamResponse.body.pipe(res);
+    return;
+  }
+
+  const { text, json } = await parseResponsePayload(upstreamResponse);
+  if (!upstreamResponse.ok) {
+    return res.status(upstreamResponse.status).json(json || { error: text || 'Upstream request failed' });
+  }
+
+  if (json && typeof json === 'object') {
+    if (typeof body.model === 'string' && typeof json.model === 'string') {
+      json.model = body.model;
+    }
+    return res.status(upstreamResponse.status).json(json);
+  }
+  return res.status(upstreamResponse.status).send(text);
 }
 
 // SSE helpers
@@ -167,29 +401,42 @@ app.post('/v1/chat/completions', authMiddleware, async (req, res) => {
   const created = Math.floor(Date.now() / 1000);
   const id = uuidv4().replace(/-/g, '');
   const modelId = body.model || 'unknown';
+  const upstream = readUpstreamConfig();
+  const modelAlias = resolveModelAlias(modelId);
 
-  const ollamaPayload = toOllamaChatPayload(body);
+  // For OpenAI-compatible third-party providers, proxy request/response directly.
+  if (upstream.type === 'openai') {
+    try {
+      return await proxyOpenAICompatibleChat(req, res, upstream, body, modelAlias);
+    } catch (e) {
+      return res.status(500).json({ error: String(e) });
+    }
+  }
+
+  const ollamaPayload = toOllamaChatPayload(body, modelAlias);
 
   if (stream) {
-    res.set(sseHeaders());
-
-    // Initial frame with role: assistant and empty content
-    writeSSE(res, {
-      id,
-      object: 'chat.completion.chunk',
-      created,
-      model: modelId,
-      choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
-    });
-
     try {
-      const r = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+      const r = await fetch(buildUpstreamUrl(upstream.base_url, upstream.chat_path), {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: buildUpstreamHeaders(req, upstream, true),
         body: JSON.stringify(Object.assign({}, ollamaPayload, { stream: true })),
       });
+      if (!r.ok) {
+        const { text, json } = await parseResponsePayload(r);
+        return res.status(r.status).json(json || { error: text || 'Upstream request failed' });
+      }
+      if (!r.body) throw new Error('No stream from upstream');
 
-      if (!r.body) throw new Error('No stream from Ollama');
+      res.set(sseHeaders());
+      writeSSE(res, {
+        id,
+        object: 'chat.completion.chunk',
+        created,
+        model: modelId,
+        choices: [{ index: 0, delta: { role: 'assistant', content: '' }, finish_reason: null }],
+      });
+
       const reader = r.body;
       reader.on('data', (chunk) => {
         const lines = chunk.toString().split(/\n/).filter(Boolean);
@@ -207,7 +454,6 @@ app.post('/v1/chat/completions', authMiddleware, async (req, res) => {
               });
             }
             if (j?.done) {
-              // final empty content frame with finish_reason
               writeSSE(res, {
                 id,
                 object: 'chat.completion.chunk',
@@ -229,9 +475,8 @@ app.post('/v1/chat/completions', authMiddleware, async (req, res) => {
           res.end();
         }
       });
-      reader.on('error', (err) => {
-        if (!res.headersSent) res.status(500);
-        res.end();
+      reader.on('error', () => {
+        if (!res.writableEnded) res.end();
       });
     } catch (e) {
       if (!res.headersSent) res.status(500);
@@ -240,22 +485,28 @@ app.post('/v1/chat/completions', authMiddleware, async (req, res) => {
     return;
   }
 
-  // Non-streaming path
+  // Non-streaming path for Ollama-compatible upstream
   try {
-    const r = await fetch(`${OLLAMA_BASE_URL}/api/chat`, {
+    const r = await fetch(buildUpstreamUrl(upstream.base_url, upstream.chat_path), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: buildUpstreamHeaders(req, upstream, true),
       body: JSON.stringify(Object.assign({}, ollamaPayload, { stream: false })),
     });
-    const j = await r.json();
-    const text = stripThink(j?.message?.content || '');
-    const finish = j?.done_reason || 'stop';
+    const { text, json } = await parseResponsePayload(r);
+    if (!r.ok) {
+      return res.status(r.status).json(json || { error: text || 'Upstream request failed' });
+    }
+    const j = json || {};
     const resp = {
       id,
       object: 'chat.completion',
       created,
       model: modelId,
-      choices: [{ index: 0, message: { role: 'assistant', content: text }, finish_reason: finish }],
+      choices: [{
+        index: 0,
+        message: { role: 'assistant', content: stripThink(j?.message?.content || '') },
+        finish_reason: j?.done_reason || 'stop',
+      }],
     };
     res.json(resp);
   } catch (e) {
@@ -273,16 +524,49 @@ function execAsync(cmd, opts = {}) {
   });
 }
 
-async function isElevatorAvailable(timeoutMs = 800) {
+async function getElevatorHealth(timeoutMs = 800) {
   try {
     const ac = new (global.AbortController || require('abort-controller'))();
     const t = setTimeout(() => ac.abort(), timeoutMs);
     const r = await fetch(`http://127.0.0.1:${ELEVATOR_PORT}/health`, { signal: ac.signal });
     clearTimeout(t);
-    if (!r.ok) return false;
+    if (!r.ok) return { ok: false, error: `http_${r.status}` };
     const j = await r.json();
-    return Boolean(j && j.ok);
-  } catch { return false; }
+    return { ok: Boolean(j && j.ok), payload: j };
+  } catch (e) {
+    return { ok: false, error: String(e) };
+  }
+}
+
+async function isElevatorAvailable(timeoutMs = 800) {
+  const s = await getElevatorHealth(timeoutMs);
+  return s.ok;
+}
+
+function sleep(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function waitForElevatorReady(totalMs = 25000, intervalMs = 1000) {
+  const startedAt = Date.now();
+  let lastError = '';
+  while (Date.now() - startedAt <= totalMs) {
+    const s = await getElevatorHealth(Math.min(intervalMs, 1200));
+    if (s.ok) return { ok: true, payload: s.payload };
+    lastError = s.error || lastError;
+    await sleep(intervalMs);
+  }
+  return { ok: false, error: lastError || 'timeout' };
+}
+
+async function waitForElevatorStop(totalMs = 15000, intervalMs = 800) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt <= totalMs) {
+    const ok = await isElevatorAvailable(Math.min(intervalMs, 1200));
+    if (!ok) return true;
+    await sleep(intervalMs);
+  }
+  return false;
 }
 
 async function elevatorApply({ domain, port }) {
@@ -324,6 +608,32 @@ function ensureEnv(updates) {
   Object.assign(map, updates || {});
   const out = Object.entries(map).map(([k,v]) => `${k}=${v}`).join('\n');
   fs.writeFileSync(envPath, out);
+}
+
+function restartBridgeProcess() {
+  try {
+    const args = process.argv.slice(1);
+    const nextEnv = Object.assign({}, process.env);
+    // Let dotenv in the new process re-read current .env values.
+    delete nextEnv.HTTPS_ENABLED;
+    delete nextEnv.SSL_CERT_FILE;
+    delete nextEnv.SSL_KEY_FILE;
+    delete nextEnv.PORT;
+
+    const child = spawn(process.execPath, args, {
+      cwd: __dirname,
+      env: nextEnv,
+      detached: true,
+      stdio: 'ignore',
+    });
+    child.unref();
+
+    setTimeout(() => {
+      process.exit(0);
+    }, 400);
+  } catch (e) {
+    console.error('Auto-restart failed:', e);
+  }
 }
 
 function readHosts() {
@@ -460,28 +770,96 @@ app.post('/bridge/setup/https-hosts', async (req, res) => {
     result.steps.push({ name: 'elevation', ok: false, detail: '提权流程失败', error: e.stderr || e.stdout || String(e.err || e) });
   }
 
-  res.json(Object.assign({ certPath, keyPath, port: PORT }, result));
+  const runtimeHttps = HTTPS_ENABLED && fs.existsSync(SSL_CERT_FILE) && fs.existsSync(SSL_KEY_FILE);
+  const restartRequired = !runtimeHttps;
+  const autoRestart = String(req.body?.auto_restart ?? 'true').toLowerCase() !== 'false';
+  const autoRestartTriggered = restartRequired && autoRestart;
+  if (restartRequired) {
+    result.steps.push({
+      name: 'restart_required',
+      ok: false,
+      detail: '已写入 HTTPS 配置，但当前进程仍是 HTTP，请重启主桥接服务后再进行透明拦截测试',
+    });
+    if (autoRestartTriggered) {
+      result.steps.push({
+        name: 'auto_restart',
+        ok: true,
+        detail: '已触发主桥接服务自动重启，约 5-10 秒后请刷新页面重试',
+      });
+    }
+  }
+
+  res.json(Object.assign({ certPath, keyPath, port: PORT, runtime_https: runtimeHttps, restart_required: restartRequired, auto_restart_triggered: autoRestartTriggered }, result));
+
+  if (autoRestartTriggered) {
+    setTimeout(() => {
+      restartBridgeProcess();
+    }, 200);
+  }
 });
 
 // Install and start the elevator service (requires admin once)
 app.post('/bridge/setup/install-elevated-service', async (req, res) => {
   try {
-    const psCmd = `Start-Process PowerShell -Verb RunAs -Wait -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command "node \"${path.join(__dirname, 'scripts', 'install-elevated-service.js').replace(/\\/g,'/')}\""'`;
-    await execAsync(`powershell -Command ${psCmd}`);
-    const ok = await isElevatorAvailable(2000);
-    res.json({ ok, detail: ok ? '服务安装并启动成功' : '服务安装后不可用' });
+    const installerScript = path.join(__dirname, 'scripts', 'install-elevated-service.js').replace(/\\/g, '/');
+    const nodeExe = process.execPath.replace(/\\/g, '/');
+    const psCmd = `$arg = '"${installerScript}"'; $p = Start-Process -FilePath '${nodeExe}' -Verb RunAs -Wait -PassThru -ArgumentList $arg; exit $p.ExitCode`;
+    await execAsync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCmd}"`);
+    const ready = await waitForElevatorReady(25000, 1000);
+    if (ready.ok) return res.json({ ok: true, detail: '服务安装并启动成功' });
+
+    let serviceQuery = '';
+    let taskQuery = '';
+    try {
+      const q = await execAsync('sc.exe query TRAEBridgeElevator');
+      serviceQuery = (q.stdout || q.stderr || '').trim();
+    } catch (e) {
+      serviceQuery = (e.stdout || e.stderr || String(e.err || e)).trim();
+    }
+    try {
+      const tq = await execAsync('schtasks /Query /TN TRAEBridgeElevator /V /FO LIST');
+      taskQuery = (tq.stdout || tq.stderr || '').trim();
+    } catch (e) {
+      taskQuery = (e.stdout || e.stderr || String(e.err || e)).trim();
+    }
+    res.json({ ok: false, detail: '服务安装后不可用', diagnostics: { service: serviceQuery, task: taskQuery, health_error: ready.error || '' } });
   } catch (e) {
-    res.status(500).json({ ok: false, error: e.stderr || e.stdout || String(e.err || e) });
+    // If install script exits non-zero but helper becomes healthy, treat as idempotent success.
+    const installError = e.stderr || e.stdout || String(e.err || e);
+    const ready = await waitForElevatorReady(12000, 600);
+    if (ready.ok) {
+      return res.json({
+        ok: true,
+        detail: '服务已在运行（提权命令返回非零，已按可用状态处理）',
+        diagnostics: { install_error: installError }
+      });
+    }
+
+    let healthAfterError = false;
+    try {
+      healthAfterError = await isElevatorAvailable(1500);
+    } catch {}
+    if (healthAfterError) {
+      return res.json({
+        ok: true,
+        detail: '服务已在运行（检测到健康状态，忽略提权命令错误）',
+        diagnostics: { install_error: installError }
+      });
+    }
+
+    res.status(500).json({ ok: false, detail: '服务安装失败', error: installError });
   }
 });
 
 // Uninstall the elevator service and cleanup artifacts
 app.post('/bridge/setup/uninstall-elevated-service', async (req, res) => {
   try {
-    const psCmd = `Start-Process PowerShell -Verb RunAs -Wait -ArgumentList '-NoProfile -ExecutionPolicy Bypass -Command "node \"${path.join(__dirname, 'scripts', 'uninstall-elevated-service.js').replace(/\\/g,'/')}\""'`;
-    await execAsync(`powershell -Command ${psCmd}`);
-    const ok = await isElevatorAvailable(1000);
-    res.json({ ok: !ok, detail: !ok ? '服务已卸载并清理' : '服务仍在运行或未成功卸载' });
+    const uninstallScript = path.join(__dirname, 'scripts', 'uninstall-elevated-service.js').replace(/\\/g,'/');
+    const nodeExe = process.execPath.replace(/\\/g, '/');
+    const psCmd = `$arg = '"${uninstallScript}"'; $p = Start-Process -FilePath '${nodeExe}' -Verb RunAs -Wait -PassThru -ArgumentList $arg; exit $p.ExitCode`;
+    await execAsync(`powershell -NoProfile -ExecutionPolicy Bypass -Command "${psCmd}"`);
+    const stopped = await waitForElevatorStop(15000, 800);
+    res.json({ ok: stopped, detail: stopped ? '服务已卸载并清理' : '服务仍在运行或未成功卸载' });
   } catch (e) {
     res.status(500).json({ ok: false, error: e.stderr || e.stdout || String(e.err || e) });
   }
